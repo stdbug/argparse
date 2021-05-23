@@ -51,6 +51,38 @@ TEST(Parser, Basic) {
                                      ::testing::DoubleEq(2.71)));
 }
 
+TEST(Parser, ShortOptions) {
+  {
+    Parser parser;
+    auto flag1 = parser.AddFlag("flag1", 'a');
+    auto flag2 = parser.AddFlag("flag2", 'b');
+    auto flag3 = parser.AddFlag("flag3", 'd');
+    auto integer = parser.AddArg<int>("int", 'c');
+
+    parser.ParseArgs({"binary", "-abc", "42"});
+    EXPECT_TRUE(*flag1);
+    EXPECT_TRUE(*flag2);
+    EXPECT_FALSE(*flag3);
+    EXPECT_EQ(*integer, 42);
+  }
+  {
+    Parser parser;
+    auto flag = parser.AddFlag("flag", 'a');
+    auto integer = parser.AddArg<int>("int", 'b');
+
+    EXPECT_ANY_THROW(parser.ParseArgs({"binary", "-ba", "42"}));
+  }
+}
+
+TEST(Parser, ArgWithDash) {
+  Parser parser;
+  auto strings = parser.AddMultiArg<std::string>("string");
+  parser.ParseArgs(
+      {"binary", "--string=--double-dash", "--string=-single-dash"});
+  EXPECT_THAT(strings.Values(),
+              ::testing::ElementsAre("--double-dash", "-single-dash"));
+}
+
 TEST(Parser, FreeArgs) {
   {
     Parser parser;
