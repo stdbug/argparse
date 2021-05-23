@@ -1,0 +1,80 @@
+version: 0.0.0.{build}
+
+image:
+- Ubuntu1804
+- Ubuntu2004
+- macOS
+- Visual Studio 2017
+- Visual Studio 2019
+
+platform:
+- x86
+- x64
+
+branches:
+  only:
+  - master
+
+init:
+- sh: >
+    set -e
+
+    mkdir -p /var/tmp/bazel
+
+    curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.7.5/bazelisk-$(uname -s | awk '{print tolower($0)}')-amd64 -o /var/tmp/bazel/bazelisk
+
+    chmod +x /var/tmp/bazel/bazelisk
+
+- cmd: >
+    mkdir %TEMP%\bazel
+
+    curl -L https://github.com/bazelbuild/bazelisk/releases/download/v1.7.5/bazelisk-windows-amd64.exe -o %TEMP%\bazel\bazelisk.exe
+
+cache:
+- bazel_disk_cache
+
+build_script:
+- sh: >
+    set -e
+
+    /var/tmp/bazel/bazelisk build --disk_cache=bazel_disk_cache -c fastbuild --cxxopt -std=c++17 --build_python_zip -- //...:all
+
+    /var/tmp/bazel/bazelisk build --disk_cache=bazel_disk_cache -c dbg --cxxopt -std=c++17 --build_python_zip -- //...:all
+
+    /var/tmp/bazel/bazelisk build --disk_cache=bazel_disk_cache -c opt --cxxopt -std=c++17 --build_python_zip -- //...:all
+
+- cmd: >
+    %TEMP%\bazel\bazelisk.exe build --disk_cache=bazel_disk_cache --cxxopt /std:c++17 --build_python_zip -c fastbuild //...:all
+
+    if %errorlevel% neq 0 exit /b %errorlevel%
+
+    %TEMP%\bazel\bazelisk.exe build --disk_cache=bazel_disk_cache --cxxopt /std:c++17 --build_python_zip -c dbg //...:all
+
+    if %errorlevel% neq 0 exit /b %errorlevel%
+
+    %TEMP%\bazel\bazelisk.exe build --disk_cache=bazel_disk_cache --cxxopt /std:c++17 --build_python_zip -c opt //...:all
+
+    if %errorlevel% neq 0 exit /b %errorlevel%
+
+test_script:
+- sh: >
+    set -e
+
+    /var/tmp/bazel/bazelisk test --disk_cache=bazel_disk_cache -c fastbuild --cxxopt -std=c++17 --build_python_zip -- //...:all
+
+    /var/tmp/bazel/bazelisk test --disk_cache=bazel_disk_cache -c dbg --cxxopt -std=c++17 --build_python_zip -- //...:all
+
+    /var/tmp/bazel/bazelisk test --disk_cache=bazel_disk_cache -c opt --cxxopt -std=c++17 --build_python_zip -- //...:all
+
+- cmd: >
+    %TEMP%\bazel\bazelisk.exe test --disk_cache=bazel_disk_cache --cxxopt /std:c++17 --build_python_zip -c fastbuild //...:all
+
+    if %errorlevel% neq 0 exit /b %errorlevel%
+
+    %TEMP%\bazel\bazelisk.exe test --disk_cache=bazel_disk_cache --cxxopt /std:c++17 --build_python_zip -c dbg //...:all
+
+    if %errorlevel% neq 0 exit /b %errorlevel%
+
+    %TEMP%\bazel\bazelisk.exe test --disk_cache=bazel_disk_cache --cxxopt /std:c++17 --build_python_zip -c opt //...:all
+
+    if %errorlevel% neq 0 exit /b %errorlevel%
