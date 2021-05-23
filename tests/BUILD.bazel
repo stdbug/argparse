@@ -1,0 +1,10 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "argparse_test",
+    srcs = ["argparse_test.cpp"],
+    deps = [
+        "//argparse",
+        "@com_google_googletest//:gtest_main",
+    ],
+)

@@ -1,0 +1,25 @@
+---
+BasedOnStyle: Google
+AccessModifierOffset: -2
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: None
+AllowShortLoopsOnASingleLine: false
+BreakConstructorInitializers: BeforeComma
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+DerivePointerAlignment: false
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:            '^"(glog|gtest|gmock)/'
+    Priority:         3
+  - Regex:            '<[[:alnum:]_]+>'
+    Priority:         4
+  - Regex:            '<.+\.h>'
+    Priority:         5
+  - Regex:            '^"[^/]+$'
+    Priority:         1
+  - Regex:            '^".*'
+    Priority:         2
+IncludeIsMainRegex: "(_test)?$"
+PointerAlignment: Left
