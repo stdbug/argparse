@@ -67,8 +67,8 @@ TEST(Parser, ShortOptions) {
   }
   {
     Parser parser;
-    auto flag = parser.AddFlag("flag", 'a');
-    auto integer = parser.AddArg<int>("int", 'b');
+    parser.AddFlag("flag", 'a');
+    parser.AddArg<int>("int", 'b');
 
     EXPECT_ANY_THROW(parser.ParseArgs({"binary", "-ba", "42"}));
   }
