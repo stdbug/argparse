@@ -2,3 +2,4 @@
 # TODO
 * custom parsers for "simple" types (integers, floats, strings)
 * global arguments
+* support `--help` option
