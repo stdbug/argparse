@@ -172,6 +172,11 @@ TEST(Parser, CustomType) {
     Parser parser;
     EXPECT_ANY_THROW(parser.AddArg<IntPair>("integers").Options({{0, 1}}));
   }
+  {
+    Parser parser;
+    parser.AddArg<IntPair>("integers");
+    EXPECT_ANY_THROW(parser.ParseArgs({"binary", "--integers", "whatever"}));
+  }
 }
 
 TEST(Parser, CustomParser) {
