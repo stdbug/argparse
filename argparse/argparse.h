@@ -178,12 +178,12 @@ public:
   virtual void OnValue(const std::string& str) override {
     ARGPARSE_FAIL_IF(HasValue(), "This argument accepts only one value");
     std::optional<Type> value = caster_(str);
-    ARGPARSE_FAIL_IF(
-        !value, "Value caster for argument `" + fullname() +
-                    "` returned nothing. Did you provide a custom parser?");
+    ARGPARSE_FAIL_IF(!value,
+                     "Value caster for an argument returned nothing (`" +
+                         fullname() + "`). Did you provide a custom parser?");
     ARGPARSE_FAIL_IF(options_ && !IsValidValue(*value, *options_),
-                     "Argument `" + str + "` provided for `" + fullname() +
-                         "` casts to an illegal value");
+                     "Provided argument casts to an illegal value (`" + str +
+                         "` for argument `" + fullname() + "`)");
     value_ = std::move(value);
   }
 
@@ -199,18 +199,20 @@ public:
   void set_value(Type value) {
     ARGPARSE_FAIL_IF(
         options_ && !IsValidValue(value, *options_),
-        "Value provided for `" + fullname() + "` is not among valid options");
+        "Value provided for an argument is not among valid options (`" +
+            fullname() + "`)");
     value_ = std::move(value);
   }
 
   void set_options(std::vector<Type> options) {
-    ARGPARSE_FAIL_IF(
-        !detail::EqualExists<Type>::value,
-        "No operator== defined for type of `" + fullname() + "` argument!");
+    ARGPARSE_FAIL_IF(!detail::EqualExists<Type>::value,
+                     "No operator== defined for the type of the argument (`" +
+                         fullname() + "`)");
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
-    ARGPARSE_FAIL_IF(value_ && !IsValidValue(*value_, options),
-                     "Contained argument value provided for `" + fullname() +
-                         "` is not among valid options");
+    ARGPARSE_FAIL_IF(
+        value_ && !IsValidValue(*value_, options),
+        "The contained argument value is not among valid options (`" +
+            fullname() + "`)");
     options_ = std::move(options);
   }
 
@@ -269,22 +271,24 @@ public:
                                                return !IsValidValue(value,
                                                                     *options_);
                                              }),
-                     "One of the values provided for `" + fullname() +
-                         "` is not among valid options");
+                     "One of the values provided for an argument is not among "
+                     "valid options (`" +
+                         fullname() + "`)");
     values_ = std::move(values);
   }
 
   void set_options(std::vector<Type> options) {
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
-    ARGPARSE_FAIL_IF(
-        !detail::EqualExists<Type>::value,
-        "No operator== defined for type of `" + fullname() + "` argument!");
+    ARGPARSE_FAIL_IF(!detail::EqualExists<Type>::value,
+                     "No operator== defined for the type of the argument (`" +
+                         fullname() + "`)");
     ARGPARSE_FAIL_IF(std::any_of(values_.begin(), values_.end(),
                                  [&options](const Type& value) {
                                    return !IsValidValue(value, options);
                                  }),
-                     "One of the contained values provided for `" + fullname() +
-                         "` is not among valid options");
+                     "One of the contained values provided for an argument is "
+                     "not among valid options (`" +
+                         fullname() + "`)");
     options_ = std::move(options);
   }
 
@@ -513,8 +517,9 @@ public:
             continue;
           }
           ARGPARSE_FAIL_IF(j != args[i].size() - 1,
-                           std::string("Short option with argument (`") + ch +
-                               "`) must be the last one in it's group");
+                           std::string("Short option with argument must be the "
+                                       "last one in it's group (option `") +
+                               ch + "`)");
           ARGPARSE_FAIL_IF(
               i + 1 >= args.size(),
               std::string("Now value provided for short option `") + ch + "`");

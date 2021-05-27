@@ -19,6 +19,27 @@ IntPair IntPairFromString(const std::string& str) {
 
 namespace {
 
+#define ASSERT_RUNTIME_ERROR(statement, msg)                                   \
+  {                                                                            \
+    std::optional<std::string> what;                                           \
+    try {                                                                      \
+      statement;                                                               \
+    } catch (std::runtime_error & err) { what = err.what(); } catch (...) {    \
+    }                                                                          \
+    if (!what) {                                                               \
+      FAIL() << "No std::runtime_error was thrown";                            \
+      GTEST_SKIP();                                                            \
+    }                                                                          \
+    if (what->find(msg) == std::string::npos) {                                \
+      FAIL() << std::string("No `") + msg +                                    \
+                    "` substring was found in the catched std::runtime_error " \
+                    "message (`" +                                             \
+                    *what + "`)";                                              \
+      GTEST_SKIP();                                                            \
+    }                                                                          \
+    SUCCEED();                                                                 \
+  }
+
 TEST(Parser, Basic) {
   Parser parser;
   auto int1 = parser.AddArg<int>("integer1");
@@ -64,7 +85,9 @@ TEST(Parser, ShortOptions) {
     parser.AddFlag("flag", 'a');
     parser.AddArg<int>("int", 'b');
 
-    EXPECT_ANY_THROW(parser.ParseArgs({"binary", "-ba", "42"}));
+    ASSERT_RUNTIME_ERROR(
+        parser.ParseArgs({"binary", "-ba", "42"}),
+        "Short option with argument must be the last one in it's group");
   }
 }
 
@@ -80,7 +103,8 @@ TEST(Parser, ArgWithDash) {
 TEST(Parser, FreeArgs) {
   {
     Parser parser;
-    EXPECT_ANY_THROW(parser.ParseArgs({"binary", "free_arg"}));
+    ASSERT_RUNTIME_ERROR(parser.ParseArgs({"binary", "free_arg"}),
+                         "Free arguments are not allowed");
   }
   {
     Parser parser(true);
@@ -104,7 +128,8 @@ TEST(Parser, Options) {
   {
     Parser parser;
     parser.AddArg<int>("integer").Options({1, 2});
-    EXPECT_ANY_THROW(parser.ParseArgs({"binary", "--integer", "5"}));
+    ASSERT_RUNTIME_ERROR(parser.ParseArgs({"binary", "--integer", "5"}),
+                         "Provided argument casts to an illegal value");
   }
   {
     Parser parser;
@@ -123,39 +148,51 @@ TEST(Parser, Options) {
 TEST(Parser, ConfigsIncompatbility) {
   {
     Parser parser;
-    EXPECT_ANY_THROW(parser.AddArg<int>("integer").Required().Default(5));
+    ASSERT_RUNTIME_ERROR(parser.AddArg<int>("integer").Required().Default(5),
+                         "Required argument can't have a default value");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(parser.AddArg<int>("integer").Default(5).Required());
+    ASSERT_RUNTIME_ERROR(parser.AddArg<int>("integer").Default(5).Required(),
+                         "Argument with a default value can't be required");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(parser.AddArg<int>("integer").Default(5).Options({1, 2}));
+    ASSERT_RUNTIME_ERROR(
+        parser.AddArg<int>("integer").Default(5).Options({1, 2}),
+        "The contained argument value is not among valid options");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(parser.AddArg<int>("integer").Options({1, 2}).Default(5));
+    ASSERT_RUNTIME_ERROR(
+        parser.AddArg<int>("integer").Options({1, 2}).Default(5),
+        "Value provided for an argument is not among valid options");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(
-        parser.AddMultiArg<int>("integer").Required().Default({5}));
+    ASSERT_RUNTIME_ERROR(
+        parser.AddMultiArg<int>("integer").Required().Default({5}),
+        "Required argument can't have a default value");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(
-        parser.AddMultiArg<int>("integer").Default({5}).Required());
+    ASSERT_RUNTIME_ERROR(
+        parser.AddMultiArg<int>("integer").Default({5}).Required(),
+        "Argument with a default value can't be required");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(
-        parser.AddMultiArg<int>("integer").Default({5}).Options({1, 2}));
+    ASSERT_RUNTIME_ERROR(
+        parser.AddMultiArg<int>("integer").Default({5}).Options({1, 2}),
+        "One of the contained values provided for an argument is not among "
+        "valid options");
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(
-        parser.AddMultiArg<int>("integer").Options({1, 2}).Default({5}));
+    ASSERT_RUNTIME_ERROR(
+        parser.AddMultiArg<int>("integer").Options({1, 2}).Default({5}),
+        "One of the values provided for an argument is not among valid "
+        "options");
   }
 }
 
@@ -170,12 +207,20 @@ TEST(Parser, CustomType) {
   }
   {
     Parser parser;
-    EXPECT_ANY_THROW(parser.AddArg<IntPair>("integers").Options({{0, 1}}));
+    ASSERT_RUNTIME_ERROR(parser.AddArg<IntPair>("integers").Options({{0, 1}}),
+                         "No operator== defined for the type of the argument");
+  }
+  {
+    Parser parser;
+    ASSERT_RUNTIME_ERROR(
+        parser.AddMultiArg<IntPair>("integers").Options({{0, 1}}),
+        "No operator== defined for the type of the argument");
   }
   {
     Parser parser;
     parser.AddArg<IntPair>("integers");
-    EXPECT_ANY_THROW(parser.ParseArgs({"binary", "--integers", "whatever"}));
+    ASSERT_RUNTIME_ERROR(parser.ParseArgs({"binary", "--integers", "whatever"}),
+                         "Value caster for an argument returned nothing");
   }
 }
 
