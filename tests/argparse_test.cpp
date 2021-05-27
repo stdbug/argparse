@@ -12,15 +12,9 @@ struct IntPair {
   int y;
 };
 
-template <>
-IntPair Cast(const std::string& str) {
+IntPair IntPairFromString(const std::string& str) {
   auto pos = str.find(',');
-  return {Cast<int>(str.substr(0, pos)), Cast<int>(str.substr(pos + 1))};
-}
-
-template <>
-bool Eq(const IntPair& a, const IntPair& b) {
-  return std::tie(a.x, a.y) == std::tie(b.x, b.y);
+  return IntPair{std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
 }
 
 namespace {
@@ -78,9 +72,9 @@ TEST(Parser, ArgWithDash) {
   Parser parser;
   auto strings = parser.AddMultiArg<std::string>("string");
   parser.ParseArgs(
-      {"binary", "--string=--double-dash", "--string=-single-dash"});
-  EXPECT_THAT(strings.Values(),
-              ::testing::ElementsAre("--double-dash", "-single-dash"));
+      {"binary", "--string=--double-dash", "--string=-dash=with=equal=signs"});
+  EXPECT_THAT(strings.Values(), ::testing::ElementsAre(
+                                    "--double-dash", "-dash=with=equal=signs"));
 }
 
 TEST(Parser, FreeArgs) {
@@ -166,11 +160,29 @@ TEST(Parser, ConfigsIncompatbility) {
 }
 
 TEST(Parser, CustomType) {
+  {
+    Parser parser;
+    auto integers =
+        parser.AddArg<IntPair>("integers").CastWith(IntPairFromString);
+    parser.ParseArgs({"binary", "--integers", "1,2"});
+    EXPECT_EQ(integers->x, 1);
+    EXPECT_EQ(integers->y, 2);
+  }
+  {
+    Parser parser;
+    EXPECT_ANY_THROW(parser.AddArg<IntPair>("integers").Options({{0, 1}}));
+  }
+}
+
+TEST(Parser, CustomParser) {
+  auto SqrtFromStr = [](const std::string& str) {
+    return std::sqrt(std::stod(str));
+  };
   Parser parser;
-  auto integers = parser.AddArg<IntPair>("integers");
-  parser.ParseArgs({"binary", "--integers", "1,2"});
-  EXPECT_EQ(integers->x, 1);
-  EXPECT_EQ(integers->y, 2);
+  auto number = parser.AddArg<double>("number").CastWith(SqrtFromStr);
+  parser.ParseArgs({"binary", "--number", "64"});
+  ASSERT_TRUE(number);
+  EXPECT_EQ(*number, 8);
 }
 
 }  // namespace

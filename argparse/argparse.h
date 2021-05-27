@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -32,36 +33,53 @@ inline void NotifyError(const std::string& msg) {
     ARGPARSE_FAIL(msg);                  \
   }
 
+struct No {};
+
+template <typename T>
+No operator==(const T&, const T&);
+
+template <typename T>
+struct EqualExists {
+  static constexpr bool value =
+      !std::is_same_v<decltype(*(T*)(0) == *(T*)(0)), No>;
+};
+
 }  // namespace detail
 
 template <typename Dst>
-Dst Cast(const std::string& str);
+std::optional<Dst> DefaultCaster(const std::string& str) {
+  return std::nullopt;
+}
 
 template <>
-int Cast(const std::string& str) {
+std::optional<int> DefaultCaster(const std::string& str) {
   return std::stoi(str);
 }
 
 template <>
-double Cast(const std::string& str) {
+std::optional<double> DefaultCaster(const std::string& str) {
   return std::stod(str);
 }
 
 template <>
-std::string Cast(const std::string& str) {
+std::optional<std::string> DefaultCaster(const std::string& str) {
   return str;
 }
 
 template <typename T>
-bool Eq(const T& a, const T& b) {
-  return a == b;
+std::optional<bool> DefaultEquals(const T& a, const T& b) {
+  if constexpr (detail::EqualExists<T>::value) {
+    return a == b;
+  } else {
+    return std::nullopt;
+  }
 }
 
 template <typename Type>
 bool IsValidValue(const Type& value, const std::vector<Type>& options) {
   return std::any_of(options.begin(), options.end(),
                      [&value](const Type& option) {
-                       return Eq(value, option);
+                       return *DefaultEquals(value, option);
                      });
 }
 
@@ -159,11 +177,19 @@ public:
 
   virtual void OnValue(const std::string& str) override {
     ARGPARSE_FAIL_IF(HasValue(), "This argument accepts only one value");
-    Type value = Cast<Type>(str);
-    ARGPARSE_FAIL_IF(options_ && !IsValidValue(value, *options_),
+    std::optional<Type> value = caster_(str);
+    ARGPARSE_FAIL_IF(
+        !value, "Value caster for argument `" + fullname() +
+                    "` returned nothing. Did you provide a custom parser?");
+    ARGPARSE_FAIL_IF(options_ && !IsValidValue(*value, *options_),
                      "Argument `" + str + "` provided for `" + fullname() +
                          "` casts to an illegal value");
     value_ = std::move(value);
+  }
+
+  void set_caster(
+      std::function<std::optional<Type>(const std::string&)> caster) {
+    caster_ = caster;
   }
 
   const Type& value() const {
@@ -178,6 +204,9 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
+    ARGPARSE_FAIL_IF(
+        !detail::EqualExists<Type>::value,
+        "No operator== defined for type of `" + fullname() + "` argument!");
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
     ARGPARSE_FAIL_IF(value_ && !IsValidValue(*value_, options),
                      "Contained argument value provided for `" + fullname() +
@@ -189,6 +218,8 @@ private:
   std::optional<Type> value_;
   std::optional<std::vector<Type>> options_;
   bool contains_default_ = true;
+  std::function<std::optional<Type>(const std::string&)> caster_ =
+      DefaultCaster<Type>;
 };
 
 template <typename Type>
@@ -213,11 +244,19 @@ public:
   }
 
   virtual void OnValue(const std::string& str) override {
-    Type value = Cast<Type>(str);
-    ARGPARSE_FAIL_IF(options_ && !IsValidValue(value, *options_),
+    std::optional<Type> value = caster_(str);
+    ARGPARSE_FAIL_IF(!value, "Value caster for argument `" + fullname() +
+                                 "` returned nothing. Did you define "
+                                 "`DefaultCaster` or provide custom parser?");
+    ARGPARSE_FAIL_IF(options_ && !IsValidValue(*value, *options_),
                      "Argument `" + str + "` provided for `" + fullname() +
                          "` casts to an illegal value");
-    values_.push_back(std::move(value));
+    values_.push_back(std::move(*value));
+  }
+
+  void set_caster(
+      std::function<std::optional<Type>(const std::string&)> caster) {
+    caster_ = caster;
   }
 
   const std::vector<Type>& values() const {
@@ -237,6 +276,9 @@ public:
 
   void set_options(std::vector<Type> options) {
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
+    ARGPARSE_FAIL_IF(
+        !detail::EqualExists<Type>::value,
+        "No operator== defined for type of `" + fullname() + "` argument!");
     ARGPARSE_FAIL_IF(std::any_of(values_.begin(), values_.end(),
                                  [&options](const Type& value) {
                                    return !IsValidValue(value, options);
@@ -250,6 +292,8 @@ private:
   std::vector<Type> values_;
   std::optional<std::vector<Type>> options_;
   bool contains_default_ = true;
+  std::function<std::optional<Type>(const std::string&)> caster_ =
+      DefaultCaster<Type>;
 };
 
 class FlagHolderWrapper {
@@ -290,7 +334,18 @@ public:
     return *this;
   }
 
+  ArgHolderWrapper& CastWith(std::function<Type(const std::string&)> caster) {
+    ptr_->set_caster([caster](const std::string& str) -> std::optional<Type> {
+      return caster(str);
+    });
+    return *this;
+  }
+
   bool HasValue() const {
+    return ptr_->HasValue();
+  }
+
+  explicit operator bool() const {
     return ptr_->HasValue();
   }
 
@@ -328,6 +383,14 @@ public:
 
   MultiArgHolderWrapper& Options(std::vector<Type> options) {
     ptr_->set_options(std::move(options));
+    return *this;
+  }
+
+  MultiArgHolderWrapper& CastWith(
+      std::function<Type(const std::string&)> caster) {
+    ptr_->set_caster([caster](const std::string& str) -> std::optional<Type> {
+      return caster(str);
+    });
     return *this;
   }
 
