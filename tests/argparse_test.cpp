@@ -1,9 +1,9 @@
 #include "argparse/argparse.h"
 
+#include "common.h"
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#include <tuple>
 
 namespace argparse {
 
@@ -19,27 +19,6 @@ IntPair IntPairFromString(const std::string& str) {
 
 namespace {
 
-#define ASSERT_RUNTIME_ERROR(statement, msg)                                   \
-  {                                                                            \
-    std::optional<std::string> what;                                           \
-    try {                                                                      \
-      statement;                                                               \
-    } catch (std::runtime_error & err) { what = err.what(); } catch (...) {    \
-    }                                                                          \
-    if (!what) {                                                               \
-      FAIL() << "No std::runtime_error was thrown";                            \
-      GTEST_SKIP();                                                            \
-    }                                                                          \
-    if (what->find(msg) == std::string::npos) {                                \
-      FAIL() << std::string("No `") + msg +                                    \
-                    "` substring was found in the catched std::runtime_error " \
-                    "message (`" +                                             \
-                    *what + "`)";                                              \
-      GTEST_SKIP();                                                            \
-    }                                                                          \
-    SUCCEED();                                                                 \
-  }
-
 TEST(Parser, Basic) {
   Parser parser;
   auto int1 = parser.AddArg<int>("integer1");
@@ -52,12 +31,12 @@ TEST(Parser, Basic) {
   parser.ParseArgs({"binary", "--integer1", "42", "-i", "-2147483648",
                     "--boolean1", "--doubles", "3.14", "-d", "2.71"});
 
-  ASSERT_TRUE(int1.HasValue());
+  ASSERT_TRUE(int1);
   EXPECT_EQ(*int1, 42);
-  ASSERT_TRUE(int2.HasValue());
+  ASSERT_TRUE(int2);
   EXPECT_EQ(*int2, -2147483648);
-  ASSERT_TRUE(int3.HasValue());
-  EXPECT_FALSE(int4.HasValue());
+  ASSERT_TRUE(int3);
+  EXPECT_FALSE(int4);
   EXPECT_EQ(*int3, -1);
   EXPECT_TRUE(*bool1);
   EXPECT_FALSE(*bool2);
@@ -107,13 +86,15 @@ TEST(Parser, FreeArgs) {
                          "Free arguments are not allowed");
   }
   {
-    Parser parser(true);
+    Parser parser;
+    parser.EnableFreeArgs();
     ASSERT_NO_THROW(parser.ParseArgs({"binary", "free_arg"}));
     EXPECT_THAT(parser.FreeArgs(),
                 ::testing::ElementsAre(std::string("free_arg")));
   }
   {
-    Parser parser(true);
+    Parser parser;
+    parser.EnableFreeArgs();
     auto integer = parser.AddArg<int>("integer");
     ASSERT_NO_THROW(parser.ParseArgs(
         std::vector<std::string>{"binary", "--integer", "5", "free_arg"}));

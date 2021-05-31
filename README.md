@@ -104,5 +104,4 @@ parser.AddArg<int>("integer").Options({0, 1}).Default(42);
 ```
 
 # TODO
-* global arguments
 * support `--help` option

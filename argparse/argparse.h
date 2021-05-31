@@ -9,8 +9,14 @@
 #include <unordered_map>
 #include <vector>
 
-namespace argparse {
+#define ARGPARSE_FAIL(msg) ::argparse::detail::NotifyError(msg)
 
+#define ARGPARSE_FAIL_IF(condition, msg) \
+  if (condition) {                       \
+    ARGPARSE_FAIL(msg);                  \
+  }
+
+namespace argparse {
 namespace detail {
 
 inline std::tuple<std::string, std::optional<std::string>> SplitLongArg(
@@ -26,12 +32,9 @@ inline void NotifyError(const std::string& msg) {
   throw std::runtime_error(msg);
 }
 
-#define ARGPARSE_FAIL(msg) ::argparse::detail::NotifyError(msg)
+}  // namespace detail
 
-#define ARGPARSE_FAIL_IF(condition, msg) \
-  if (condition) {                       \
-    ARGPARSE_FAIL(msg);                  \
-  }
+namespace meta {
 
 struct No {};
 
@@ -44,7 +47,7 @@ struct EqualExists {
       !std::is_same_v<decltype(*(T*)(0) == *(T*)(0)), No>;
 };
 
-}  // namespace detail
+}  // namespace meta
 
 template <typename Dst>
 std::optional<Dst> DefaultCaster(const std::string& str) {
@@ -52,23 +55,23 @@ std::optional<Dst> DefaultCaster(const std::string& str) {
 }
 
 template <>
-std::optional<int> DefaultCaster(const std::string& str) {
+inline std::optional<int> DefaultCaster(const std::string& str) {
   return std::stoi(str);
 }
 
 template <>
-std::optional<double> DefaultCaster(const std::string& str) {
+inline std::optional<double> DefaultCaster(const std::string& str) {
   return std::stod(str);
 }
 
 template <>
-std::optional<std::string> DefaultCaster(const std::string& str) {
+inline std::optional<std::string> DefaultCaster(const std::string& str) {
   return str;
 }
 
 template <typename T>
 std::optional<bool> DefaultEquals(const T& a, const T& b) {
-  if constexpr (detail::EqualExists<T>::value) {
+  if constexpr (meta::EqualExists<T>::value) {
     return a == b;
   } else {
     return std::nullopt;
@@ -205,7 +208,7 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    ARGPARSE_FAIL_IF(!detail::EqualExists<Type>::value,
+    ARGPARSE_FAIL_IF(!meta::EqualExists<Type>::value,
                      "No operator== defined for the type of the argument (`" +
                          fullname() + "`)");
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
@@ -279,7 +282,7 @@ public:
 
   void set_options(std::vector<Type> options) {
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
-    ARGPARSE_FAIL_IF(!detail::EqualExists<Type>::value,
+    ARGPARSE_FAIL_IF(!meta::EqualExists<Type>::value,
                      "No operator== defined for the type of the argument (`" +
                          fullname() + "`)");
     ARGPARSE_FAIL_IF(std::any_of(values_.begin(), values_.end(),
@@ -418,21 +421,152 @@ private:
   MultiArgHolder<Type>* ptr_;
 };
 
-class Parser {
-public:
-  Parser(bool allow_free_args = false)
-      : holders_()
-      , short_long_mapping_()
-      , free_args_(allow_free_args ? std::optional(std::vector<std::string>())
-                                   : std::nullopt) {}
+namespace detail {
 
+class Holders {
+public:
   FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
                             const std::string& help = "") {
     CheckOptionEntry(fullname, shortname);
+    UpdateShortLongMapping(fullname, shortname);
     auto holder = std::make_unique<FlagHolder>(fullname, shortname, help);
     FlagHolderWrapper wrapper(holder.get());
     holders_[fullname] = std::move(holder);
     return wrapper;
+  }
+
+  template <typename Type>
+  ArgHolderWrapper<Type> AddArg(const std::string& fullname, char shortname,
+                                const std::string& help = "") {
+    CheckOptionEntry(fullname, shortname);
+    UpdateShortLongMapping(fullname, shortname);
+    auto holder = std::make_unique<ArgHolder<Type>>(fullname, shortname, help);
+    ArgHolderWrapper<Type> wrapper(holder.get());
+    holders_[fullname] = std::move(holder);
+    return wrapper;
+  }
+
+  template <typename Type>
+  MultiArgHolderWrapper<Type> AddMultiArg(const std::string& fullname,
+                                          char shortname,
+                                          const std::string& help = "") {
+    CheckOptionEntry(fullname, shortname);
+    UpdateShortLongMapping(fullname, shortname);
+    auto holder =
+        std::make_unique<MultiArgHolder<Type>>(fullname, shortname, help);
+    MultiArgHolderWrapper<Type> wrapper(holder.get());
+    holders_[fullname] = std::move(holder);
+    return wrapper;
+  }
+
+  ArgHolderBase* GetHolderByFullName(const std::string& fullname) {
+    auto it = holders_.find(fullname);
+    if (it == holders_.end()) {
+      return nullptr;
+    }
+
+    return it->second.get();
+  }
+
+  ArgHolderBase* GetHolderByShortName(char shortname) {
+    auto im = short_long_mapping_.find(shortname);
+    if (im == short_long_mapping_.end()) {
+      return nullptr;
+    }
+
+    auto it = holders_.find(im->second);
+    if (it == holders_.end()) {
+      return nullptr;
+    }
+
+    return it->second.get();
+  }
+
+  void CheckArgs() const {
+    for (auto& [name, arg] : holders_) {
+      ARGPARSE_FAIL_IF(arg->required() && !arg->HasValue(),
+                       "Now value provided for option: " + name);
+    }
+  }
+
+  void CheckOptionEntry(const std::string& fullname, char shortname) {
+    ARGPARSE_FAIL_IF(fullname == "help", "`help` is a predefined option");
+    ARGPARSE_FAIL_IF(holders_.count(fullname),
+                     "Argument is already defined (`" + fullname + "`)");
+    ARGPARSE_FAIL_IF(
+        short_long_mapping_.count(shortname),
+        std::string("Argument with shortname is already defined (`") +
+            shortname + "`)");
+  }
+
+private:
+  void UpdateShortLongMapping(const std::string& fullname, char shortname) {
+    if (shortname != '\0') {
+      short_long_mapping_[shortname] = fullname;
+    }
+  }
+
+private:
+  std::unordered_map<std::string, std::unique_ptr<ArgHolderBase>> holders_;
+  std::unordered_map<char, std::string> short_long_mapping_;
+};
+
+inline Holders* GlobalHolders() {
+  static Holders* holders = new Holders;
+  return holders;
+}
+
+}  // namespace detail
+
+inline FlagHolderWrapper AddGlobalFlag(const std::string& fullname,
+                                       char shortname,
+                                       const std::string& help = "") {
+  return detail::GlobalHolders()->AddFlag(fullname, shortname, help);
+}
+
+inline FlagHolderWrapper AddGlobalFlag(const std::string& fullname,
+                                       const std::string& help = "") {
+  return AddGlobalFlag(fullname, '\0', help);
+}
+
+template <typename Type>
+ArgHolderWrapper<Type> AddGlobalArg(const std::string& fullname, char shortname,
+                                    const std::string& help = "") {
+  return detail::GlobalHolders()->AddArg<Type>(fullname, shortname, help);
+}
+
+template <typename Type>
+ArgHolderWrapper<Type> AddGlobalArg(const std::string& fullname,
+                                    const std::string& help = "") {
+  return AddGlobalArg<Type>(fullname, '\0', help);
+}
+
+template <typename Type>
+MultiArgHolderWrapper<Type> AddGlobalMultiArg(const std::string& fullname,
+                                              char shortname,
+                                              const std::string& help = "") {
+  return detail::GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
+}
+
+template <typename Type>
+MultiArgHolderWrapper<Type> AddGlobalMultiArg(const std::string& fullname,
+                                              const std::string& help = "") {
+  return AddGlobalMultiArg<Type>(fullname, '\0', help);
+}
+
+class Parser {
+public:
+  Parser()
+      : holders_()
+      , free_args_(std::nullopt)
+      , parse_global_args_(true) {}
+
+  FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
+                            const std::string& help = "") {
+    if (parse_global_args_) {
+      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+    }
+    return holders_.AddFlag(fullname, shortname, help);
   }
 
   FlagHolderWrapper AddFlag(const std::string& fullname,
@@ -443,11 +577,10 @@ public:
   template <typename Type>
   ArgHolderWrapper<Type> AddArg(const std::string& fullname, char shortname,
                                 const std::string& help = "") {
-    CheckOptionEntry(fullname, shortname);
-    auto holder = std::make_unique<ArgHolder<Type>>(fullname, shortname, help);
-    ArgHolderWrapper<Type> wrapper(holder.get());
-    holders_[fullname] = std::move(holder);
-    return wrapper;
+    if (parse_global_args_) {
+      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+    }
+    return holders_.AddArg<Type>(fullname, shortname, help);
   }
 
   template <typename Type>
@@ -460,18 +593,24 @@ public:
   MultiArgHolderWrapper<Type> AddMultiArg(const std::string& fullname,
                                           char shortname,
                                           const std::string& help = "") {
-    CheckOptionEntry(fullname, shortname);
-    auto holder =
-        std::make_unique<MultiArgHolder<Type>>(fullname, shortname, help);
-    MultiArgHolderWrapper<Type> wrapper(holder.get());
-    holders_[fullname] = std::move(holder);
-    return wrapper;
+    if (parse_global_args_) {
+      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+    }
+    return holders_.AddMultiArg<Type>(fullname, shortname, help);
   }
 
   template <typename Type>
   MultiArgHolderWrapper<Type> AddMultiArg(const std::string& fullname,
                                           const std::string& help = "") {
     return AddMultiArg<Type>(fullname, '\0', help);
+  }
+
+  void EnableFreeArgs() {
+    free_args_ = std::vector<std::string>();
+  }
+
+  void EnableGlobalArgs() {
+    parse_global_args_ = true;
   }
 
   void ParseArgs(const std::vector<std::string>& args) {
@@ -484,10 +623,10 @@ public:
 
       if (args[i].substr(0, 2) == "--") {
         auto [name, value] = detail::SplitLongArg(args[i].substr(2));
-        auto it = holders_.find(name);
-        ARGPARSE_FAIL_IF(it == holders_.end(), "Unknown option: " + name);
-        it->second->OnFlag();
-        if (!it->second->AcceptsValue()) {
+        ArgHolderBase* holder = GetHolderByFullName(name);
+        ARGPARSE_FAIL_IF(holder == nullptr, "Unknown option: " + name);
+        holder->OnFlag();
+        if (!holder->AcceptsValue()) {
           ARGPARSE_FAIL_IF(value.has_value(),
                            "Option `" + name + "` doesn't accept values");
           continue;
@@ -495,25 +634,22 @@ public:
         if (!value) {
           ARGPARSE_FAIL_IF(
               i + 1 >= args.size(),
-              "Now value provided for option: " + it->second->fullname());
+              "Now value provided for option: " + holder->fullname());
           i++;
           value = args[i];
         }
-        it->second->OnValue(*value);
+        holder->OnValue(*value);
         continue;
       }
 
       if (args[i][0] == '-') {
         for (size_t j = 1; j < args[i].size(); j++) {
           char ch = args[i][j];
-          auto it = short_long_mapping_.find(ch);
-          ARGPARSE_FAIL_IF(it == short_long_mapping_.end(),
-                           std::string("Unknown short option: `") + ch + "`");
-          auto ihld = holders_.find(it->second);
-          ARGPARSE_FAIL_IF(ihld == holders_.end(),
-                           std::string("Unknown short option: `") + ch + "`");
-          ihld->second->OnFlag();
-          if (!ihld->second->AcceptsValue()) {
+          ArgHolderBase* holder = GetHolderByShortName(ch);
+          ARGPARSE_FAIL_IF(holder == nullptr,
+                           std::string("Unknown short option: ") + ch);
+          holder->OnFlag();
+          if (!holder->AcceptsValue()) {
             continue;
           }
           ARGPARSE_FAIL_IF(j != args[i].size() - 1,
@@ -524,7 +660,7 @@ public:
               i + 1 >= args.size(),
               std::string("Now value provided for short option `") + ch + "`");
           i++;
-          ihld->second->OnValue(args[i]);
+          holder->OnValue(args[i]);
           break;
         }
         continue;
@@ -535,7 +671,8 @@ public:
       free_args_->push_back(args[i]);
     }
 
-    CheckArgs();
+    detail::GlobalHolders()->CheckArgs();
+    holders_.CheckArgs();
   }
 
   void ParseArgs(int argc, char* argv[]) {
@@ -552,28 +689,31 @@ public:
   }
 
 private:
-  void CheckOptionEntry(const std::string& fullname, char shortname) {
-    ARGPARSE_FAIL_IF(fullname == "help", "`help` is a predefined option");
-    ARGPARSE_FAIL_IF(holders_.count(fullname),
-                     "Argument `" + fullname + "` is already defined");
-    ARGPARSE_FAIL_IF(short_long_mapping_.count(shortname),
-                     std::string("Argument with shortname `") + shortname +
-                         "` is already defined");
-    if (shortname != '\0') {
-      short_long_mapping_[shortname] = fullname;
+  ArgHolderBase* GetHolderByFullName(const std::string& fullname) {
+    if (parse_global_args_) {
+      auto holder = detail::GlobalHolders()->GetHolderByFullName(fullname);
+      if (holder) {
+        return holder;
+      }
     }
+
+    return holders_.GetHolderByFullName(fullname);
   }
 
-  void CheckArgs() const {
-    for (auto& [name, arg] : holders_) {
-      ARGPARSE_FAIL_IF(arg->required() && !arg->HasValue(),
-                       "Now value provided for option: " + name);
+  ArgHolderBase* GetHolderByShortName(char shortname) {
+    if (parse_global_args_) {
+      auto holder = detail::GlobalHolders()->GetHolderByShortName(shortname);
+      if (holder) {
+        return holder;
+      }
     }
+
+    return holders_.GetHolderByShortName(shortname);
   }
 
-  std::unordered_map<std::string, std::unique_ptr<ArgHolderBase>> holders_;
-  std::unordered_map<char, std::string> short_long_mapping_;
+  detail::Holders holders_;
   std::optional<std::vector<std::string>> free_args_;
+  bool parse_global_args_;
 };
 
 }  // namespace argparse
