@@ -1,5 +1,7 @@
 #include "argparse/argparse.h"
 
-ARGPARSE_DEFINE_GLOBAL_FLAG(boolean, "boolean", 'b', "");
-ARGPARSE_DEFINE_GLOBAL_ARG(int, integer, "integer", 'i', "");
-ARGPARSE_DEFINE_GLOBAL_MULTIARG(double, doubles, "doubles", 'd', "");
+argparse::FlagHolderWrapper boolean = argparse::AddGlobalFlag("boolean", 'b');
+extern ::argparse::ArgHolderWrapper<int> integer =
+    argparse::AddGlobalArg<int>("integer", 'i');
+extern ::argparse::MultiArgHolderWrapper<double> doubles =
+    argparse::AddGlobalMultiArg<double>("doubles", 'd');

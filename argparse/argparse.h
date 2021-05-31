@@ -516,10 +516,17 @@ inline Holders* GlobalHolders() {
   return holders;
 }
 
+}  // namespace detail
+
 inline FlagHolderWrapper AddGlobalFlag(const std::string& fullname,
                                        char shortname,
                                        const std::string& help = "") {
   return detail::GlobalHolders()->AddFlag(fullname, shortname, help);
+}
+
+inline FlagHolderWrapper AddGlobalFlag(const std::string& fullname,
+                                       const std::string& help = "") {
+  return AddGlobalFlag(fullname, '\0', help);
 }
 
 template <typename Type>
@@ -529,13 +536,23 @@ ArgHolderWrapper<Type> AddGlobalArg(const std::string& fullname, char shortname,
 }
 
 template <typename Type>
+ArgHolderWrapper<Type> AddGlobalArg(const std::string& fullname,
+                                    const std::string& help = "") {
+  return AddGlobalArg<Type>(fullname, '\0', help);
+}
+
+template <typename Type>
 MultiArgHolderWrapper<Type> AddGlobalMultiArg(const std::string& fullname,
                                               char shortname,
                                               const std::string& help = "") {
   return detail::GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
 }
 
-}  // namespace detail
+template <typename Type>
+MultiArgHolderWrapper<Type> AddGlobalMultiArg(const std::string& fullname,
+                                              const std::string& help = "") {
+  return AddGlobalMultiArg<Type>(fullname, '\0', help);
+}
 
 class Parser {
 public:
@@ -699,25 +716,3 @@ private:
 };
 
 }  // namespace argparse
-
-#define ARGPARSE_DECLARE_GLOBAL_FLAG(varname) \
-  extern ::argparse::FlagHolderWrapper varname;
-
-#define ARGPARSE_DECLARE_GLOBAL_ARG(Type, varname) \
-  extern ::argparse::ArgHolderWrapper<Type> varname;
-
-#define ARGPARSE_DECLARE_GLOBAL_MULTIARG(Type, varname) \
-  extern ::argparse::MultiArgHolderWrapper<Type> varname;
-
-#define ARGPARSE_DEFINE_GLOBAL_FLAG(varname, fullname, shortname, help) \
-  ::argparse::FlagHolderWrapper varname =                               \
-      ::argparse::detail::AddGlobalFlag(fullname, shortname, help)
-
-#define ARGPARSE_DEFINE_GLOBAL_ARG(Type, varname, fullname, shortname, help) \
-  ::argparse::ArgHolderWrapper<Type> varname =                               \
-      ::argparse::detail::AddGlobalArg<Type>(fullname, shortname, help)
-
-#define ARGPARSE_DEFINE_GLOBAL_MULTIARG(Type, varname, fullname, shortname, \
-                                        help)                               \
-  ::argparse::MultiArgHolderWrapper<Type> varname =                         \
-      ::argparse::detail::AddGlobalMultiArg<Type>(fullname, shortname, help)

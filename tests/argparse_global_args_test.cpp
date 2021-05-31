@@ -5,9 +5,9 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-ARGPARSE_DECLARE_GLOBAL_FLAG(boolean);
-ARGPARSE_DECLARE_GLOBAL_ARG(int, integer);
-ARGPARSE_DECLARE_GLOBAL_MULTIARG(double, doubles);
+extern ::argparse::FlagHolderWrapper boolean;
+extern ::argparse::ArgHolderWrapper<int> integer;
+extern ::argparse::MultiArgHolderWrapper<double> doubles;
 
 namespace argparse {
 namespace {
@@ -20,7 +20,7 @@ TEST(Parser, GlobalArgs) {
                        "Argument is already defined");
   ASSERT_RUNTIME_ERROR(parser.AddFlag("doubles"),
                        "Argument is already defined");
-  parser.ParseArgs({"binary", "-bi", "42", "-d", "2.71", "-d", "3.14"});
+  parser.ParseArgs({"binary", "-bi", "42", "-d", "2.71", "--doubles", "3.14"});
   EXPECT_TRUE(*::boolean);
   ASSERT_TRUE(::integer);
   EXPECT_EQ(*::integer, 42);
