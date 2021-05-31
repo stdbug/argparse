@@ -671,6 +671,7 @@ public:
       free_args_->push_back(args[i]);
     }
 
+    detail::GlobalHolders()->CheckArgs();
     holders_.CheckArgs();
   }
 
