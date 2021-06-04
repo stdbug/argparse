@@ -49,7 +49,7 @@ if (*boolean) {
 ```
 
 For non-boolean flags first check if it was set (unless a default value is set
-or the argument marked as required, see [below](#default-and-required-values))
+or the argument is marked as required, see [below](#default-and-required-values))
 ```cpp
 if (integer) {
   std::cout << "integer was set equal to " << *integer << "\n";
