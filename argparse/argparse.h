@@ -609,8 +609,8 @@ public:
     free_args_ = std::vector<std::string>();
   }
 
-  void EnableGlobalArgs() {
-    parse_global_args_ = true;
+  void IgnoreGlobalFlags() {
+    parse_global_args_ = false;
   }
 
   void ParseArgs(const std::vector<std::string>& args) {
@@ -671,7 +671,10 @@ public:
       free_args_->push_back(args[i]);
     }
 
-    detail::GlobalHolders()->CheckArgs();
+    if (parse_global_args_) {
+      detail::GlobalHolders()->CheckArgs();
+    }
+
     holders_.CheckArgs();
   }
 
@@ -717,3 +720,10 @@ private:
 };
 
 }  // namespace argparse
+
+#define ARGPARSE_DECLARE_GLOBAL_FLAG(name) \
+  extern ::argparse::FlagHolderWrapper name;
+#define ARGPARSE_DECLARE_GLOBAL_ARG(Type, name) \
+  extern ::argparse::ArgHolderWrapper<Type> name;
+#define ARGPARSE_DECLARE_GLOBAL_MULTIARG(Type, name) \
+  extern ::argparse::MultiArgHolderWrapper<Type> name;
