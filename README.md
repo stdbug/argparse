@@ -103,5 +103,25 @@ parser.AddArg<int>("integer").Required().Default(42);
 parser.AddArg<int>("integer").Options({0, 1}).Default(42);
 ```
 
+## Global args
+In order to create a global argument use `argparse::Add*` functions and
+`ARGPARSE_DECLARE_GLOBAL_*` macros to declare arguments defined in external
+compilation units
+```
+// library.cpp
+auto integer = argparse::AddGlobalArg<int>("integer");
+
+// main.cpp
+ARGPARSE_DECLARE_GLOBAL_ARG(int, integer);
+
+int main(int argc, char* argv[]) {
+  argparse::Parser parser;
+  auto local_flag = parser.AddFlag("boolean");
+  parser.ParseArgs(argc, argv);
+
+  // use both `local_flag` and `integer` global argument
+}
+```
+
 # TODO
 * support `--help` option
