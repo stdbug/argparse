@@ -124,4 +124,5 @@ int main(int argc, char* argv[]) {
 ```
 
 # TODO
+* support free arguments starting with a dash
 * support `--help` option
