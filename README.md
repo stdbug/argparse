@@ -125,4 +125,5 @@ int main(int argc, char* argv[]) {
 
 # TODO
 * support free arguments starting with a dash
+* range-based access to multiargs
 * support `--help` option
