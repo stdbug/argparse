@@ -61,12 +61,14 @@ TEST(Parser, ShortOptions) {
   }
   {
     Parser parser;
-    parser.AddFlag("flag", 'a');
-    parser.AddArg<int>("int", 'b');
+    parser.EnableFreeArgs();
+    auto flag = parser.AddFlag("flag", 'a');
+    auto integer = parser.AddArg<int>("int", 'b');
 
-    ASSERT_RUNTIME_ERROR(
-        parser.ParseArgs({"binary", "-ba", "42"}),
-        "Short option with argument must be the last one in it's group");
+    parser.ParseArgs({"binary", "-ba", "42"});
+    EXPECT_FALSE(*flag);
+    EXPECT_FALSE(integer);
+    EXPECT_THAT(parser.FreeArgs(), ::testing::ElementsAre("-ba", "42"));
   }
 }
 
@@ -88,9 +90,11 @@ TEST(Parser, FreeArgs) {
   {
     Parser parser;
     parser.EnableFreeArgs();
-    ASSERT_NO_THROW(parser.ParseArgs({"binary", "free_arg"}));
-    EXPECT_THAT(parser.FreeArgs(),
-                ::testing::ElementsAre(std::string("free_arg")));
+    ASSERT_NO_THROW(
+        parser.ParseArgs({"binary", "-free-arg", "--free-arg", "---free-arg"}));
+    EXPECT_THAT(
+        parser.FreeArgs(),
+        ::testing::ElementsAre("-free-arg", "--free-arg", "---free-arg"));
   }
   {
     Parser parser;
@@ -98,8 +102,7 @@ TEST(Parser, FreeArgs) {
     auto integer = parser.AddArg<int>("integer");
     ASSERT_NO_THROW(parser.ParseArgs(
         std::vector<std::string>{"binary", "--integer", "5", "free_arg"}));
-    EXPECT_THAT(parser.FreeArgs(),
-                ::testing::ElementsAre(std::string("free_arg")));
+    EXPECT_THAT(parser.FreeArgs(), ::testing::ElementsAre("free_arg"));
     EXPECT_TRUE(integer.HasValue());
     EXPECT_EQ(*integer, 5);
   }
@@ -181,7 +184,7 @@ TEST(Parser, CustomType) {
   {
     Parser parser;
     auto integers =
-        parser.AddArg<IntPair>("integers").CastWith(IntPairFromString);
+        parser.AddArg<IntPair>("integers").CastUsing(IntPairFromString);
     parser.ParseArgs({"binary", "--integers", "1,2"});
     EXPECT_EQ(integers->x, 1);
     EXPECT_EQ(integers->y, 2);
@@ -210,10 +213,41 @@ TEST(Parser, CustomParser) {
     return std::sqrt(std::stod(str));
   };
   Parser parser;
-  auto number = parser.AddArg<double>("number").CastWith(SqrtFromStr);
+  auto number = parser.AddArg<double>("number").CastUsing(SqrtFromStr);
   parser.ParseArgs({"binary", "--number", "64"});
   ASSERT_TRUE(number);
   EXPECT_EQ(*number, 8);
+}
+
+TEST(Parser, PositionalArgs) {
+  Parser parser;
+  parser.EnableFreeArgs();
+  auto string = parser.AddPositionalArg<std::string>();
+  auto integer = parser.AddPositionalArg<int>();
+  parser.ParseArgs({"binary", "--number", "64", "free", "args", "go", "here"});
+  ASSERT_TRUE(string);
+  EXPECT_EQ(*string, "--number");
+  ASSERT_TRUE(integer);
+  EXPECT_EQ(*integer, 64);
+  EXPECT_THAT(parser.FreeArgs(),
+              ::testing::ElementsAre("free", "args", "go", "here"));
+}
+
+TEST(Parser, MultiplePositionalArgs) {
+  Parser parser;
+  auto [string, integer, number] =
+      parser.AddPositionalArgs<std::string, int, double>();
+  parser.EnableFreeArgs();
+  parser.ParseArgs(
+      {"binary", "--number", "64", "3.14", "free", "args", "go", "here"});
+  ASSERT_TRUE(string);
+  EXPECT_EQ(*string, "--number");
+  ASSERT_TRUE(integer);
+  EXPECT_EQ(*integer, 64);
+  ASSERT_TRUE(number);
+  EXPECT_THAT(*number, ::testing::DoubleEq(3.14));
+  EXPECT_THAT(parser.FreeArgs(),
+              ::testing::ElementsAre("free", "args", "go", "here"));
 }
 
 }  // namespace
