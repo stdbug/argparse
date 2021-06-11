@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -15,6 +16,9 @@
   if (condition) {                       \
     ARGPARSE_FAIL(msg);                  \
   }
+
+#define ARGPARSE_ASSERT(condition) \
+  ARGPARSE_FAIL_IF(!(condition), "Argparse internal assumptions failed")
 
 namespace argparse {
 namespace detail {
@@ -51,22 +55,20 @@ struct EqualExists {
 
 template <typename Dst>
 std::optional<Dst> DefaultCaster(const std::string& str) {
+  if constexpr (std::is_integral_v<Dst>) {
+    if constexpr (std::is_signed_v<Dst>) {
+      return static_cast<Dst>(std::stoll(str));
+    } else {
+      return static_cast<Dst>(std::stoul(str));
+    }
+  }
+  if constexpr (std::is_floating_point_v<Dst>) {
+    return static_cast<Dst>(std::stold(str));
+  }
+  if constexpr (std::is_same_v<Dst, std::string>) {
+    return str;
+  }
   return std::nullopt;
-}
-
-template <>
-inline std::optional<int> DefaultCaster(const std::string& str) {
-  return std::stoi(str);
-}
-
-template <>
-inline std::optional<double> DefaultCaster(const std::string& str) {
-  return std::stod(str);
-}
-
-template <>
-inline std::optional<std::string> DefaultCaster(const std::string& str) {
-  return str;
 }
 
 template <typename T>
@@ -341,7 +343,7 @@ public:
     return *this;
   }
 
-  ArgHolderWrapper& CastWith(std::function<Type(const std::string&)> caster) {
+  ArgHolderWrapper& CastUsing(std::function<Type(const std::string&)> caster) {
     ptr_->set_caster([caster](const std::string& str) -> std::optional<Type> {
       return caster(str);
     });
@@ -393,7 +395,7 @@ public:
     return *this;
   }
 
-  MultiArgHolderWrapper& CastWith(
+  MultiArgHolderWrapper& CastUsing(
       std::function<Type(const std::string&)> caster) {
     ptr_->set_caster([caster](const std::string& str) -> std::optional<Type> {
       return caster(str);
@@ -499,6 +501,10 @@ public:
             shortname + "`)");
   }
 
+  size_t Size() const {
+    return holders_.size();
+  }
+
 private:
   void UpdateShortLongMapping(const std::string& fullname, char shortname) {
     if (shortname != '\0') {
@@ -514,6 +520,10 @@ private:
 inline Holders* GlobalHolders() {
   static Holders* holders = new Holders;
   return holders;
+}
+
+inline std::string PositionalArgumentName(size_t position) {
+  return "__positional_arg__" + std::to_string(position);
 }
 
 }  // namespace detail
@@ -605,6 +615,17 @@ public:
     return AddMultiArg<Type>(fullname, '\0', help);
   }
 
+  template <typename Type>
+  ArgHolderWrapper<Type> AddPositionalArg(const std::string& help = "") {
+    return positinals_.AddArg<Type>(
+        detail::PositionalArgumentName(positinals_.Size()), '\0', help);
+  }
+
+  template <typename... Types>
+  std::tuple<ArgHolderWrapper<Types>...> AddPositionalArgs() {
+    return std::tuple<ArgHolderWrapper<Types>...>{AddPositionalArg<Types>()...};
+  }
+
   void EnableFreeArgs() {
     free_args_ = std::vector<std::string>();
   }
@@ -614,61 +635,32 @@ public:
   }
 
   void ParseArgs(const std::vector<std::string>& args) {
-    for (size_t i = 1; i < args.size(); i++) {
-      if (args[i].empty()) {
+    size_t positional_arg_count = 0;
+    for (size_t i = 1, step; i < args.size(); i += step) {
+      step = ParseLongArg(args, i);
+      if (step > 0) {
         continue;
       }
 
-      ARGPARSE_FAIL_IF(args[i].length() < 2, "Unknown option: " + args[i]);
-
-      if (args[i].substr(0, 2) == "--") {
-        auto [name, value] = detail::SplitLongArg(args[i].substr(2));
-        ArgHolderBase* holder = GetHolderByFullName(name);
-        ARGPARSE_FAIL_IF(holder == nullptr, "Unknown option: " + name);
-        holder->OnFlag();
-        if (!holder->AcceptsValue()) {
-          ARGPARSE_FAIL_IF(value.has_value(),
-                           "Option `" + name + "` doesn't accept values");
-          continue;
-        }
-        if (!value) {
-          ARGPARSE_FAIL_IF(
-              i + 1 >= args.size(),
-              "Now value provided for option: " + holder->fullname());
-          i++;
-          value = args[i];
-        }
-        holder->OnValue(*value);
+      step = ParseShortArgs(args, i);
+      if (step > 0) {
         continue;
       }
 
-      if (args[i][0] == '-') {
-        for (size_t j = 1; j < args[i].size(); j++) {
-          char ch = args[i][j];
-          ArgHolderBase* holder = GetHolderByShortName(ch);
-          ARGPARSE_FAIL_IF(holder == nullptr,
-                           std::string("Unknown short option: ") + ch);
-          holder->OnFlag();
-          if (!holder->AcceptsValue()) {
-            continue;
-          }
-          ARGPARSE_FAIL_IF(j != args[i].size() - 1,
-                           std::string("Short option with argument must be the "
-                                       "last one in it's group (option `") +
-                               ch + "`)");
-          ARGPARSE_FAIL_IF(
-              i + 1 >= args.size(),
-              std::string("Now value provided for short option `") + ch + "`");
-          i++;
-          holder->OnValue(args[i]);
-          break;
-        }
+      if (positional_arg_count < positinals_.Size()) {
+        ArgHolderBase* holder = positinals_.GetHolderByFullName(
+            detail::PositionalArgumentName(positional_arg_count++));
+        ARGPARSE_ASSERT(holder != nullptr);
+        holder->OnValue(args[i]);
+        step = 1;
         continue;
       }
 
       ARGPARSE_FAIL_IF(!free_args_, "Free arguments are not allowed");
 
       free_args_->push_back(args[i]);
+
+      step = 1;
     }
 
     if (parse_global_args_) {
@@ -692,6 +684,73 @@ public:
   }
 
 private:
+  size_t ParseLongArg(const std::vector<std::string>& args, size_t offset) {
+    if (args[offset].substr(0, 2) != "--") {
+      return 0;
+    }
+    auto [name, value] = detail::SplitLongArg(args[offset].substr(2));
+    ArgHolderBase* holder = GetHolderByFullName(name);
+    if (holder == nullptr) {
+      return 0;
+    }
+    holder->OnFlag();
+    if (!holder->AcceptsValue()) {
+      ARGPARSE_FAIL_IF(value.has_value(),
+                       "Option `" + name + "` doesn't accept values");
+      return 1;
+    }
+
+    if (value) {
+      holder->OnValue(*value);
+      return 1;
+    }
+
+    ARGPARSE_FAIL_IF(offset + 1 >= args.size(),
+                     "No value provided for option: " + holder->fullname());
+    holder->OnValue(args[offset + 1]);
+
+    return 2;
+  }
+
+  size_t ParseShortArgs(const std::vector<std::string>& args, size_t offset) {
+    const std::string& arg = args[offset];
+    if (arg.front() != '-') {
+      return 0;
+    }
+
+    // first, check if a group of short args is valid as whole before parsing
+    for (size_t i = 1; i < arg.length(); i++) {
+      char ch = arg[i];
+      ArgHolderBase* holder = GetHolderByShortName(ch);
+      if (holder == nullptr) {
+        return 0;
+      }
+      if (holder->AcceptsValue() && i != arg.length() - 1) {
+        // found a short arg accepting value which is not the last one in the
+        // group - skipping
+        return 0;
+      }
+    }
+
+    // do the actual parsing
+    for (size_t i = 1; i < arg.length(); i++) {
+      char ch = arg[i];
+      ArgHolderBase* holder = GetHolderByShortName(ch);
+      ARGPARSE_ASSERT(holder != nullptr);
+      holder->OnFlag();
+      if (holder->AcceptsValue()) {
+        ARGPARSE_ASSERT(i == arg.length() - 1);
+        ARGPARSE_FAIL_IF(
+            offset + 1 >= args.size(),
+            std::string("Now value provided for short option `") + ch + "`");
+        holder->OnValue(args[offset + 1]);
+        return 2;
+      }
+    }
+
+    return 1;
+  }
+
   ArgHolderBase* GetHolderByFullName(const std::string& fullname) {
     if (parse_global_args_) {
       auto holder = detail::GlobalHolders()->GetHolderByFullName(fullname);
@@ -715,6 +774,7 @@ private:
   }
 
   detail::Holders holders_;
+  detail::Holders positinals_;
   std::optional<std::vector<std::string>> free_args_;
   bool parse_global_args_;
 };
