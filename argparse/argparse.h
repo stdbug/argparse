@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -20,23 +21,19 @@
 #define ARGPARSE_ASSERT(condition) \
   ARGPARSE_FAIL_IF(!(condition), "Argparse internal assumptions failed")
 
-namespace argparse {
-namespace detail {
-
-inline std::tuple<std::string, std::optional<std::string>> SplitLongArg(
-    const std::string& arg) {
-  auto pos = arg.find("=");
-  if (pos == std::string::npos) {
-    return {arg, std::nullopt};
+#define ARGPARSE_RETURN_IF_FAILED(operation) \
+  {                                          \
+    detail::Status status = operation;       \
+    if (status.Failed()) {                   \
+      return status;                         \
+    }                                        \
   }
-  return {arg.substr(0, pos), arg.substr(pos + 1)};
-}
 
-inline void NotifyError(const std::string& msg) {
-  throw std::runtime_error(msg);
-}
+namespace argparse {
 
-}  // namespace detail
+class ArgparseError : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 
 namespace meta {
 
@@ -53,19 +50,62 @@ struct EqualExists {
 
 }  // namespace meta
 
+namespace detail {
+
+inline void NotifyError(const std::string& msg) {
+  throw ::argparse::ArgparseError(msg);
+}
+
+inline std::tuple<std::string, std::optional<std::string>> SplitLongArg(
+    const std::string& arg) {
+  auto pos = arg.find("=");
+  if (pos == std::string::npos) {
+    return {arg, std::nullopt};
+  }
+  return {arg.substr(0, pos), arg.substr(pos + 1)};
+}
+
+inline std::string EscapeValue(std::string value) {
+  if (!value.empty() && value[0] == '\\') {
+    value.erase(0, 1);
+  }
+
+  return value;
+}
+
 template <typename Dst>
 std::optional<Dst> DefaultCaster(const std::string& str) {
-  if constexpr (std::is_integral_v<Dst>) {
-    if constexpr (std::is_signed_v<Dst>) {
-      return static_cast<Dst>(std::stoll(str));
-    } else {
-      return static_cast<Dst>(std::stoul(str));
+  if constexpr (std::is_same_v<std::decay_t<Dst>, bool>) {
+    if (str == "false") {
+      return false;
     }
+    if (str == "true") {
+      return true;
+    }
+    return std::nullopt;
+  }
+  if constexpr (std::is_integral_v<Dst>) {
+    char* endptr;
+    Dst result;
+    if constexpr (std::is_signed_v<Dst>) {
+      result = static_cast<Dst>(std::strtoull(str.c_str(), &endptr, 10));
+    } else {
+      result = static_cast<Dst>(std::strtoll(str.c_str(), &endptr, 10));
+    }
+    if (endptr != str.c_str() + str.length()) {
+      return std::nullopt;
+    }
+    return result;
   }
   if constexpr (std::is_floating_point_v<Dst>) {
-    return static_cast<Dst>(std::stold(str));
+    char* endptr;
+    Dst result = static_cast<Dst>(std::strtold(str.c_str(), &endptr));
+    if (endptr != str.c_str() + str.length()) {
+      return std::nullopt;
+    }
+    return result;
   }
-  if constexpr (std::is_same_v<Dst, std::string>) {
+  if constexpr (std::is_constructible_v<Dst, std::string>) {
     return str;
   }
   return std::nullopt;
@@ -88,6 +128,8 @@ bool IsValidValue(const Type& value, const std::vector<Type>& options) {
                      });
 }
 
+}  // namespace detail
+
 class ArgHolderBase {
 public:
   ArgHolderBase(std::string fullname, char shortname, std::string help,
@@ -100,9 +142,10 @@ public:
   virtual ~ArgHolderBase() = default;
 
   virtual bool HasValue() const = 0;
-  virtual bool AcceptsValue() const = 0;
-  virtual void OnFlag() = 0;
-  virtual void OnValue(const std::string& value) = 0;
+  virtual bool RequiresValue() const = 0;
+
+  virtual void ProcessFlag() = 0;
+  virtual void ProcessValue(const std::string& value_str) = 0;
 
   const std::string& fullname() const {
     return fullname_;
@@ -114,6 +157,8 @@ public:
     return help_;
   }
   void set_required(bool required) {
+    ARGPARSE_FAIL_IF(HasValue(),
+                     "Argument with a default value can't be required");
     required_ = required;
   }
   bool required() const {
@@ -131,31 +176,31 @@ class FlagHolder : public ArgHolderBase {
 public:
   FlagHolder(std::string fullname, char shortname, std::string help)
       : ArgHolderBase(fullname, shortname, help)
-      , value_(false) {}
+      , value_(0) {}
 
   virtual bool HasValue() const override {
     return true;
   }
 
-  virtual bool AcceptsValue() const override {
+  virtual bool RequiresValue() const override {
     return false;
   }
 
-  virtual void OnFlag() override {
-    value_ = true;
+  virtual void ProcessFlag() override {
+    value_++;
   }
 
-  virtual void OnValue(const std::string& str) override {
-    (void)str;
-    ARGPARSE_FAIL("Flag argument doesn't accept any value");
+  virtual void ProcessValue(const std::string& value_str) override {
+    (void)value_str;
+    ARGPARSE_FAIL("Flags don't accept values");
   }
 
-  bool value() const {
+  size_t value() const {
     return value_;
   }
 
 private:
-  bool value_ = false;
+  size_t value_;
 };
 
 template <typename Type>
@@ -168,28 +213,26 @@ public:
     return value_.has_value();
   }
 
-  virtual bool AcceptsValue() const override {
+  virtual bool RequiresValue() const override {
     return true;
   }
 
-  virtual void OnFlag() override {
-    if (contains_default_) {
-      value_.reset();
-      contains_default_ = false;
-    }
-    ARGPARSE_FAIL_IF(HasValue(), "This argument accepts only one value");
+  virtual void ProcessFlag() override {
+    ARGPARSE_FAIL("Argument requires a value (`" + fullname() + "`)");
   }
 
-  virtual void OnValue(const std::string& str) override {
-    ARGPARSE_FAIL_IF(HasValue(), "This argument accepts only one value");
-    std::optional<Type> value = caster_(str);
-    ARGPARSE_FAIL_IF(!value,
-                     "Value caster for an argument returned nothing (`" +
-                         fullname() + "`). Did you provide a custom parser?");
-    ARGPARSE_FAIL_IF(options_ && !IsValidValue(*value, *options_),
-                     "Provided argument casts to an illegal value (`" + str +
-                         "` for argument `" + fullname() + "`)");
-    value_ = std::move(value);
+  virtual void ProcessValue(const std::string& value_str) override {
+    ARGPARSE_FAIL_IF(HasValue() && !contains_default_,
+                     "Argument accepts only one value (`" + fullname() + "`)");
+
+    std::optional<Type> value = caster_(value_str);
+    ARGPARSE_FAIL_IF(!value, "Failed to cast argument string to value type (`" +
+                                 fullname() + "`)");
+    ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(*value, *options_),
+                     "Provided argument string casts to an illegal value (`" +
+                         fullname() + "`)");
+
+    value_ = std::move(*value);
   }
 
   void set_caster(
@@ -202,22 +245,17 @@ public:
   }
 
   void set_value(Type value) {
-    ARGPARSE_FAIL_IF(
-        options_ && !IsValidValue(value, *options_),
-        "Value provided for an argument is not among valid options (`" +
-            fullname() + "`)");
+    ARGPARSE_FAIL_IF(required(),
+                     "Required argument can't have a default value");
     value_ = std::move(value);
   }
 
   void set_options(std::vector<Type> options) {
+    ARGPARSE_FAIL_IF(options.empty(),
+                     "Set of options can't be empty (`" + fullname() + "`)");
     ARGPARSE_FAIL_IF(!meta::EqualExists<Type>::value,
                      "No operator== defined for the type of the argument (`" +
                          fullname() + "`)");
-    ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
-    ARGPARSE_FAIL_IF(
-        value_ && !IsValidValue(*value_, options),
-        "The contained argument value is not among valid options (`" +
-            fullname() + "`)");
     options_ = std::move(options);
   }
 
@@ -226,7 +264,7 @@ private:
   std::optional<std::vector<Type>> options_;
   bool contains_default_ = true;
   std::function<std::optional<Type>(const std::string&)> caster_ =
-      DefaultCaster<Type>;
+      detail::DefaultCaster<Type>;
 };
 
 template <typename Type>
@@ -239,25 +277,25 @@ public:
     return !values_.empty();
   }
 
-  virtual bool AcceptsValue() const override {
+  virtual bool RequiresValue() const override {
     return true;
   }
 
-  virtual void OnFlag() override {
+  virtual void ProcessFlag() override {
+    ARGPARSE_FAIL("This argument requires a value");
+  }
+
+  virtual void ProcessValue(const std::string& value_str) override {
     if (contains_default_) {
       values_.clear();
       contains_default_ = false;
     }
-  }
 
-  virtual void OnValue(const std::string& str) override {
-    std::optional<Type> value = caster_(str);
-    ARGPARSE_FAIL_IF(!value, "Value caster for argument `" + fullname() +
-                                 "` returned nothing. Did you define "
-                                 "`DefaultCaster` or provide custom parser?");
-    ARGPARSE_FAIL_IF(options_ && !IsValidValue(*value, *options_),
-                     "Argument `" + str + "` provided for `" + fullname() +
-                         "` casts to an illegal value");
+    std::optional<Type> value = caster_(value_str);
+    ARGPARSE_FAIL_IF(!value, "Failed to cast string to value type");
+    ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(*value, *options_),
+                     "Provided argument string casts to an illegal value");
+
     values_.push_back(std::move(*value));
   }
 
@@ -271,28 +309,16 @@ public:
   }
 
   void set_values(std::vector<Type> values) {
-    ARGPARSE_FAIL_IF(options_ && std::any_of(values.begin(), values.end(),
-                                             [this](const Type& value) {
-                                               return !IsValidValue(value,
-                                                                    *options_);
-                                             }),
-                     "One of the values provided for an argument is not among "
-                     "valid options (`" +
-                         fullname() + "`)");
+    ARGPARSE_FAIL_IF(required(),
+                     "Required argument can't have a default value");
     values_ = std::move(values);
   }
 
   void set_options(std::vector<Type> options) {
-    ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty");
+    ARGPARSE_FAIL_IF(options.empty(),
+                     "Set of options can't be empty (`" + fullname() + "`)");
     ARGPARSE_FAIL_IF(!meta::EqualExists<Type>::value,
                      "No operator== defined for the type of the argument (`" +
-                         fullname() + "`)");
-    ARGPARSE_FAIL_IF(std::any_of(values_.begin(), values_.end(),
-                                 [&options](const Type& value) {
-                                   return !IsValidValue(value, options);
-                                 }),
-                     "One of the contained values provided for an argument is "
-                     "not among valid options (`" +
                          fullname() + "`)");
     options_ = std::move(options);
   }
@@ -302,7 +328,7 @@ private:
   std::optional<std::vector<Type>> options_;
   bool contains_default_ = true;
   std::function<std::optional<Type>(const std::string&)> caster_ =
-      DefaultCaster<Type>;
+      detail::DefaultCaster<Type>;
 };
 
 class FlagHolderWrapper {
@@ -310,7 +336,7 @@ public:
   FlagHolderWrapper(FlagHolder* ptr)
       : ptr_(ptr) {}
 
-  bool operator*() const {
+  size_t operator*() const {
     return ptr_->value();
   }
 
@@ -325,16 +351,12 @@ public:
       : ptr_(ptr) {}
 
   ArgHolderWrapper& Required() {
-    ARGPARSE_FAIL_IF(ptr_->HasValue(),
-                     "Argument with a default value can't be required");
     ptr_->set_required(true);
     return *this;
   }
 
   ArgHolderWrapper& Default(Type value) {
-    ARGPARSE_FAIL_IF(ptr_->required(),
-                     "Required argument can't have a default value");
-    ptr_->set_value(value);
+    ptr_->set_value(std::move(value));
     return *this;
   }
 
@@ -348,10 +370,6 @@ public:
       return caster(str);
     });
     return *this;
-  }
-
-  bool HasValue() const {
-    return ptr_->HasValue();
   }
 
   explicit operator bool() const {
@@ -377,15 +395,11 @@ public:
       : ptr_(ptr) {}
 
   MultiArgHolderWrapper& Required() {
-    ARGPARSE_FAIL_IF(ptr_->HasValue(),
-                     "Argument with a default value can't be required");
     ptr_->set_required(true);
     return *this;
   }
 
   MultiArgHolderWrapper& Default(std::vector<Type> values) {
-    ARGPARSE_FAIL_IF(ptr_->required(),
-                     "Required argument can't have a default value");
     ptr_->set_values(std::move(values));
     return *this;
   }
@@ -484,13 +498,6 @@ public:
     return it->second.get();
   }
 
-  void CheckArgs() const {
-    for (auto& [name, arg] : holders_) {
-      ARGPARSE_FAIL_IF(arg->required() && !arg->HasValue(),
-                       "Now value provided for option: " + name);
-    }
-  }
-
   void CheckOptionEntry(const std::string& fullname, char shortname) {
     ARGPARSE_FAIL_IF(fullname == "help", "`help` is a predefined option");
     ARGPARSE_FAIL_IF(holders_.count(fullname),
@@ -501,18 +508,25 @@ public:
             shortname + "`)");
   }
 
+  void PerformPostParseCheck() const {
+    for (auto& [name, arg] : holders_) {
+      ARGPARSE_FAIL_IF(arg->required() && !arg->HasValue(),
+                       "Now value provided for option `" + name + "`");
+    }
+  }
+
   size_t Size() const {
     return holders_.size();
   }
 
 private:
   void UpdateShortLongMapping(const std::string& fullname, char shortname) {
+    ARGPARSE_ASSERT(!short_long_mapping_.count(shortname));
     if (shortname != '\0') {
       short_long_mapping_[shortname] = fullname;
     }
   }
 
-private:
   std::unordered_map<std::string, std::unique_ptr<ArgHolderBase>> holders_;
   std::unordered_map<char, std::string> short_long_mapping_;
 };
@@ -523,7 +537,7 @@ inline Holders* GlobalHolders() {
 }
 
 inline std::string PositionalArgumentName(size_t position) {
-  return "__positional_arg__" + std::to_string(position);
+  return "__positional_argument__" + std::to_string(position);
 }
 
 }  // namespace detail
@@ -617,13 +631,15 @@ public:
 
   template <typename Type>
   ArgHolderWrapper<Type> AddPositionalArg(const std::string& help = "") {
-    return positinals_.AddArg<Type>(
-        detail::PositionalArgumentName(positinals_.Size()), '\0', help);
+    return positionals_.AddArg<Type>(
+        detail::PositionalArgumentName(positionals_.Size()), '\0', help);
   }
 
   template <typename... Types>
-  std::tuple<ArgHolderWrapper<Types>...> AddPositionalArgs() {
-    return std::tuple<ArgHolderWrapper<Types>...>{AddPositionalArg<Types>()...};
+  std::tuple<ArgHolderWrapper<Types>...> AddPositionalArgs(
+      const std::string& help = "") {
+    return std::tuple<ArgHolderWrapper<Types>...>{
+        AddPositionalArg<Types>(help)...};
   }
 
   void EnableFreeArgs() {
@@ -634,118 +650,140 @@ public:
     parse_global_args_ = false;
   }
 
-  void ParseArgs(const std::vector<std::string>& args) {
+  void ParseArgs(const std::vector<std::string>& args,
+                 const std::optional<std::string>& tail_mark = std::nullopt) {
     size_t positional_arg_count = 0;
     for (size_t i = 1, step; i < args.size(); i += step) {
-      step = ParseLongArg(args, i);
-      if (step > 0) {
+      if (args[i] == tail_mark) {
+        std::copy(args.begin() + i + 1, args.end(),
+                  std::back_inserter(tail_args_));
+        break;
+      }
+
+      if (args[i].length() > 2 && args[i].substr(0, 2) == "--") {
+        step = ParseLongArg(args, i);
+        ARGPARSE_ASSERT(step > 0);
         continue;
       }
 
-      step = ParseShortArgs(args, i);
-      if (step > 0) {
+      if (args[i].length() > 1 && args[i][0] == '-') {
+        step = ParseShortArgs(args, i);
+        ARGPARSE_ASSERT(step > 0);
         continue;
       }
 
-      if (positional_arg_count < positinals_.Size()) {
-        ArgHolderBase* holder = positinals_.GetHolderByFullName(
+      if (positional_arg_count < positionals_.Size()) {
+        ArgHolderBase* holder = positionals_.GetHolderByFullName(
             detail::PositionalArgumentName(positional_arg_count++));
         ARGPARSE_ASSERT(holder != nullptr);
-        holder->OnValue(args[i]);
+        holder->ProcessValue(detail::EscapeValue(args[i]));
         step = 1;
         continue;
       }
 
-      ARGPARSE_FAIL_IF(!free_args_, "Free arguments are not allowed");
+      ARGPARSE_FAIL_IF(!free_args_, "Free arguments are not enabled");
 
-      free_args_->push_back(args[i]);
+      free_args_->push_back(detail::EscapeValue(args[i]));
 
       step = 1;
     }
 
-    if (parse_global_args_) {
-      detail::GlobalHolders()->CheckArgs();
-    }
-
-    holders_.CheckArgs();
+    PerformPostParseCheck();
   }
 
-  void ParseArgs(int argc, char* argv[]) {
+  void ParseArgs(int argc, char* argv[],
+                 const std::optional<std::string>& tail_mark = std::nullopt) {
     std::vector<std::string> args;
     for (int i = 0; i < argc; i++) {
       args.push_back(argv[i]);
     }
 
-    ParseArgs(args);
+    ParseArgs(args, tail_mark);
   }
 
   const std::vector<std::string>& FreeArgs() const {
     return *free_args_;
   }
 
+  const std::vector<std::string>& TailArgs() const {
+    return tail_args_;
+  }
+
 private:
-  size_t ParseLongArg(const std::vector<std::string>& args, size_t offset) {
-    if (args[offset].substr(0, 2) != "--") {
-      return 0;
+  void PerformPostParseCheck() const {
+    if (parse_global_args_) {
+      detail::GlobalHolders()->PerformPostParseCheck();
     }
+
+    holders_.PerformPostParseCheck();
+
+    positionals_.PerformPostParseCheck();
+  }
+
+  size_t ParseLongArg(const std::vector<std::string>& args, size_t offset) {
+    ARGPARSE_ASSERT(args[offset].length() > 2 &&
+                    args[offset].substr(0, 2) == "--");
+
     auto [name, value] = detail::SplitLongArg(args[offset].substr(2));
     ArgHolderBase* holder = GetHolderByFullName(name);
-    if (holder == nullptr) {
-      return 0;
-    }
-    holder->OnFlag();
-    if (!holder->AcceptsValue()) {
-      ARGPARSE_FAIL_IF(value.has_value(),
-                       "Option `" + name + "` doesn't accept values");
+    ARGPARSE_FAIL_IF(holder == nullptr, "Unknown long option (`" + name + "`)");
+
+    if (value) {
+      ARGPARSE_FAIL_IF(!holder->RequiresValue(),
+                       "Long option doesn't require a value (`" + name + "`)");
+
+      holder->ProcessValue(*value);
       return 1;
     }
 
-    if (value) {
-      holder->OnValue(*value);
+    if (!holder->RequiresValue()) {
+      holder->ProcessFlag();
       return 1;
     }
 
     ARGPARSE_FAIL_IF(offset + 1 >= args.size(),
-                     "No value provided for option: " + holder->fullname());
-    holder->OnValue(args[offset + 1]);
+                     "No value provided for a long option (`" + name + "`)");
 
+    holder->ProcessValue(args[offset + 1]);
     return 2;
   }
 
   size_t ParseShortArgs(const std::vector<std::string>& args, size_t offset) {
+    ARGPARSE_ASSERT(args[offset].length() > 1 && args[offset][0] == '-');
+
     const std::string& arg = args[offset];
-    if (arg.front() != '-') {
-      return 0;
-    }
 
-    // first, check if a group of short args is valid as whole before parsing
     for (size_t i = 1; i < arg.length(); i++) {
       char ch = arg[i];
       ArgHolderBase* holder = GetHolderByShortName(ch);
-      if (holder == nullptr) {
-        return 0;
-      }
-      if (holder->AcceptsValue() && i != arg.length() - 1) {
-        // found a short arg accepting value which is not the last one in the
-        // group - skipping
-        return 0;
-      }
-    }
+      ARGPARSE_FAIL_IF(holder == nullptr,
+                       std::string("Unknown short option (`") + ch + "`)");
 
-    // do the actual parsing
-    for (size_t i = 1; i < arg.length(); i++) {
-      char ch = arg[i];
-      ArgHolderBase* holder = GetHolderByShortName(ch);
-      ARGPARSE_ASSERT(holder != nullptr);
-      holder->OnFlag();
-      if (holder->AcceptsValue()) {
-        ARGPARSE_ASSERT(i == arg.length() - 1);
-        ARGPARSE_FAIL_IF(
-            offset + 1 >= args.size(),
-            std::string("Now value provided for short option `") + ch + "`");
-        holder->OnValue(args[offset + 1]);
-        return 2;
+      if (holder->RequiresValue()) {
+        if (i + 1 == arg.length()) {
+          // last short option of a group requiring a value
+          // (e.g. -euxo pipefail)
+          ARGPARSE_FAIL_IF(
+              offset + 1 >= args.size(),
+              std::string("No value provided for a short option (`") + ch +
+                  "`)");
+
+          holder->ProcessValue(args[offset + 1]);
+          return 2;
+        }
+
+        if (i == 1 && arg.length() > 2) {
+          // option like -j5
+          holder->ProcessValue(arg.substr(2));
+          return 1;
+        }
+
+        ARGPARSE_FAIL(
+            "Short option requiring an argument is not allowed in the middle "
+            "of short options group");
       }
+
+      holder->ProcessFlag();
     }
 
     return 1;
@@ -774,8 +812,9 @@ private:
   }
 
   detail::Holders holders_;
-  detail::Holders positinals_;
+  detail::Holders positionals_;
   std::optional<std::vector<std::string>> free_args_;
+  std::vector<std::string> tail_args_;
   bool parse_global_args_;
 };
 

@@ -14,12 +14,12 @@ namespace {
 
 TEST(Parser, GlobalArgs) {
   Parser parser;
-  ASSERT_RUNTIME_ERROR(parser.AddFlag("boolean"),
-                       "Argument is already defined");
-  ASSERT_RUNTIME_ERROR(parser.AddFlag("integer"),
-                       "Argument is already defined");
-  ASSERT_RUNTIME_ERROR(parser.AddFlag("doubles"),
-                       "Argument is already defined");
+  ASSERT_ARGPARSE_ERROR(parser.AddFlag("boolean"),
+                        "Argument is already defined");
+  ASSERT_ARGPARSE_ERROR(parser.AddFlag("integer"),
+                        "Argument is already defined");
+  ASSERT_ARGPARSE_ERROR(parser.AddFlag("doubles"),
+                        "Argument is already defined");
   parser.ParseArgs({"binary", "-bi", "42", "-d", "2.71", "--doubles", "3.14"});
   EXPECT_TRUE(*::boolean);
   ASSERT_TRUE(::integer);
