@@ -12,9 +12,10 @@ struct IntPair {
   int y;
 };
 
-IntPair IntPairFromString(const std::string& str) {
+template <>
+IntPair Cast(const std::string& str) {
   auto pos = str.find(',');
-  return IntPair{std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
+  return {std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
 }
 
 namespace {
@@ -118,6 +119,13 @@ TEST(Parser, Options) {
   }
 }
 
+TEST(Parser, Required) {
+  Parser parser;
+  parser.AddArg<int>("integer").Required();
+  ASSERT_ARGPARSE_ERROR(parser.ParseArgs({"binary"}),
+                        "No value provided for option");
+}
+
 TEST(Parser, ConfigsIncompatbility) {
   {
     Parser parser;
@@ -146,36 +154,11 @@ TEST(Parser, ConfigsIncompatbility) {
 TEST(Parser, CustomType) {
   {
     Parser parser;
-    auto integers =
-        parser.AddArg<IntPair>("integers").CastUsing(IntPairFromString);
+    auto integers = parser.AddArg<IntPair>("integers");
     parser.ParseArgs({"binary", "--integers", "1,2"});
     EXPECT_EQ(integers->x, 1);
     EXPECT_EQ(integers->y, 2);
   }
-  {
-    Parser parser;
-    ASSERT_ARGPARSE_ERROR(parser.AddArg<IntPair>("integers").Options({{0, 1}}),
-                          "No operator== defined for the type of the argument");
-  }
-  {
-    Parser parser;
-    parser.AddArg<IntPair>("integers");
-    ASSERT_ARGPARSE_ERROR(
-        parser.ParseArgs({"binary", "--integers", "whatever"}),
-
-        "Failed to cast argument string to value type");
-  }
-}
-
-TEST(Parser, CustomParser) {
-  auto SqrtFromStr = [](const std::string& str) {
-    return std::sqrt(std::stod(str));
-  };
-  Parser parser;
-  auto number = parser.AddArg<double>("number").CastUsing(SqrtFromStr);
-  parser.ParseArgs({"binary", "--number", "64"});
-  ASSERT_TRUE(number);
-  EXPECT_EQ(*number, 8);
 }
 
 TEST(Parser, PositionalArgs) {
@@ -232,28 +215,11 @@ TEST(Parser, BigExample) {
 
   auto unused_and_unset_boolean = parser.AddArg<bool>("unused-boolean");
 
-  parser.ParseArgs({"binary",
-                    "run",
-                    "--rm",
-                    "-it",
-                    "-vvv",
-                    "-j4",
-                    "--name",
-                    "name",
-                    "--use-something=false",
-                    "--use-something-else=true",
-                    "-eo",
-                    "pipefail",
-                    "2.5",
-                    "42",
+  parser.ParseArgs({"binary", "run", "--rm", "-it", "-vvv", "-j4", "--name",
+                    "name", "--use-something=false",
+                    "--use-something-else=true", "-eo", "pipefail", "2.5", "42",
                     "\\--something-with-leading-dashes",
-                    "will-not-match-anything",
-                    "--",
-                    "subcommand",
-                    "--other",
-                    "args",
-                    "42"},
-                   "--");
+                    "will-not-match-anything"});
 
   EXPECT_EQ(*command, "run");
   EXPECT_TRUE(*rm);
@@ -276,8 +242,6 @@ TEST(Parser, BigExample) {
   EXPECT_EQ(*str, "--something-with-leading-dashes");
   EXPECT_THAT(parser.FreeArgs(),
               ::testing::ElementsAre("will-not-match-anything"));
-  EXPECT_THAT(parser.TailArgs(),
-              ::testing::ElementsAre("subcommand", "--other", "args", "42"));
   EXPECT_FALSE(unused_and_unset_boolean);
 }
 
