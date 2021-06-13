@@ -12,9 +12,10 @@ struct IntPair {
   int y;
 };
 
-IntPair IntPairFromString(const std::string& str) {
+template <>
+IntPair Cast(const std::string& str) {
   auto pos = str.find(',');
-  return IntPair{std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
+  return {std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
 }
 
 namespace {
@@ -59,24 +60,13 @@ TEST(Parser, ShortOptions) {
     EXPECT_FALSE(*flag3);
     EXPECT_EQ(*integer, 42);
   }
-  {
-    Parser parser;
-    parser.EnableFreeArgs();
-    auto flag = parser.AddFlag("flag", 'a');
-    auto integer = parser.AddArg<int>("int", 'b');
-
-    parser.ParseArgs({"binary", "-ba", "42"});
-    EXPECT_FALSE(*flag);
-    EXPECT_FALSE(integer);
-    EXPECT_THAT(parser.FreeArgs(), ::testing::ElementsAre("-ba", "42"));
-  }
 }
 
 TEST(Parser, ArgWithDash) {
   Parser parser;
   auto strings = parser.AddMultiArg<std::string>("string");
-  parser.ParseArgs(
-      {"binary", "--string=--double-dash", "--string=-dash=with=equal=signs"});
+  parser.ParseArgs({"binary", "--string=--double-dash", "--string",
+                    "-dash=with=equal=signs"});
   EXPECT_THAT(strings.Values(), ::testing::ElementsAre(
                                     "--double-dash", "-dash=with=equal=signs"));
 }
@@ -84,14 +74,14 @@ TEST(Parser, ArgWithDash) {
 TEST(Parser, FreeArgs) {
   {
     Parser parser;
-    ASSERT_RUNTIME_ERROR(parser.ParseArgs({"binary", "free_arg"}),
-                         "Free arguments are not allowed");
+    ASSERT_ARGPARSE_ERROR(parser.ParseArgs({"binary", "free_arg"}),
+                          "Free arguments are not enabled");
   }
   {
     Parser parser;
     parser.EnableFreeArgs();
-    ASSERT_NO_THROW(
-        parser.ParseArgs({"binary", "-free-arg", "--free-arg", "---free-arg"}));
+    parser.ParseArgs(
+        {"binary", "\\-free-arg", "\\--free-arg", "\\---free-arg"});
     EXPECT_THAT(
         parser.FreeArgs(),
         ::testing::ElementsAre("-free-arg", "--free-arg", "---free-arg"));
@@ -100,10 +90,10 @@ TEST(Parser, FreeArgs) {
     Parser parser;
     parser.EnableFreeArgs();
     auto integer = parser.AddArg<int>("integer");
-    ASSERT_NO_THROW(parser.ParseArgs(
-        std::vector<std::string>{"binary", "--integer", "5", "free_arg"}));
+    parser.ParseArgs(
+        std::vector<std::string>{"binary", "--integer", "5", "free_arg"});
     EXPECT_THAT(parser.FreeArgs(), ::testing::ElementsAre("free_arg"));
-    EXPECT_TRUE(integer.HasValue());
+    EXPECT_TRUE(integer);
     EXPECT_EQ(*integer, 5);
   }
 }
@@ -112,111 +102,63 @@ TEST(Parser, Options) {
   {
     Parser parser;
     parser.AddArg<int>("integer").Options({1, 2});
-    ASSERT_RUNTIME_ERROR(parser.ParseArgs({"binary", "--integer", "5"}),
-                         "Provided argument casts to an illegal value");
+    ASSERT_ARGPARSE_ERROR(parser.ParseArgs({"binary", "--integer", "5"}),
+                          "Provided argument string casts to an illegal value");
   }
   {
     Parser parser;
     parser.AddArg<int>("integer").Options({1, 2});
-    EXPECT_NO_THROW(parser.ParseArgs({"binary"}));
+    ASSERT_NO_THROW(parser.ParseArgs({"binary"}));
   }
   {
     Parser parser;
     auto integer = parser.AddArg<int>("integer").Options({1, 2});
     parser.ParseArgs({"binary", "--integer", "1"});
-    EXPECT_TRUE(integer.HasValue());
+    ASSERT_TRUE(integer);
     EXPECT_EQ(*integer, 1);
   }
+}
+
+TEST(Parser, Required) {
+  Parser parser;
+  parser.AddArg<int>("integer").Required();
+  ASSERT_ARGPARSE_ERROR(parser.ParseArgs({"binary"}),
+                        "No value provided for option");
 }
 
 TEST(Parser, ConfigsIncompatbility) {
   {
     Parser parser;
-    ASSERT_RUNTIME_ERROR(parser.AddArg<int>("integer").Required().Default(5),
-                         "Required argument can't have a default value");
+    ASSERT_ARGPARSE_ERROR(parser.AddArg<int>("integer").Required().Default(5),
+                          "Required argument can't have a default value");
   }
   {
     Parser parser;
-    ASSERT_RUNTIME_ERROR(parser.AddArg<int>("integer").Default(5).Required(),
-                         "Argument with a default value can't be required");
+    ASSERT_ARGPARSE_ERROR(parser.AddArg<int>("integer").Default(5).Required(),
+                          "Argument with a default value can't be required");
   }
   {
     Parser parser;
-    ASSERT_RUNTIME_ERROR(
-        parser.AddArg<int>("integer").Default(5).Options({1, 2}),
-        "The contained argument value is not among valid options");
-  }
-  {
-    Parser parser;
-    ASSERT_RUNTIME_ERROR(
-        parser.AddArg<int>("integer").Options({1, 2}).Default(5),
-        "Value provided for an argument is not among valid options");
-  }
-  {
-    Parser parser;
-    ASSERT_RUNTIME_ERROR(
+    ASSERT_ARGPARSE_ERROR(
         parser.AddMultiArg<int>("integer").Required().Default({5}),
         "Required argument can't have a default value");
   }
   {
     Parser parser;
-    ASSERT_RUNTIME_ERROR(
+    ASSERT_ARGPARSE_ERROR(
         parser.AddMultiArg<int>("integer").Default({5}).Required(),
         "Argument with a default value can't be required");
-  }
-  {
-    Parser parser;
-    ASSERT_RUNTIME_ERROR(
-        parser.AddMultiArg<int>("integer").Default({5}).Options({1, 2}),
-        "One of the contained values provided for an argument is not among "
-        "valid options");
-  }
-  {
-    Parser parser;
-    ASSERT_RUNTIME_ERROR(
-        parser.AddMultiArg<int>("integer").Options({1, 2}).Default({5}),
-        "One of the values provided for an argument is not among valid "
-        "options");
   }
 }
 
 TEST(Parser, CustomType) {
   {
     Parser parser;
-    auto integers =
-        parser.AddArg<IntPair>("integers").CastUsing(IntPairFromString);
+    auto integers = parser.AddArg<IntPair>("integers");
     parser.ParseArgs({"binary", "--integers", "1,2"});
     EXPECT_EQ(integers->x, 1);
     EXPECT_EQ(integers->y, 2);
   }
-  {
-    Parser parser;
-    ASSERT_RUNTIME_ERROR(parser.AddArg<IntPair>("integers").Options({{0, 1}}),
-                         "No operator== defined for the type of the argument");
-  }
-  {
-    Parser parser;
-    ASSERT_RUNTIME_ERROR(
-        parser.AddMultiArg<IntPair>("integers").Options({{0, 1}}),
-        "No operator== defined for the type of the argument");
-  }
-  {
-    Parser parser;
-    parser.AddArg<IntPair>("integers");
-    ASSERT_RUNTIME_ERROR(parser.ParseArgs({"binary", "--integers", "whatever"}),
-                         "Value caster for an argument returned nothing");
-  }
-}
-
-TEST(Parser, CustomParser) {
-  auto SqrtFromStr = [](const std::string& str) {
-    return std::sqrt(std::stod(str));
-  };
-  Parser parser;
-  auto number = parser.AddArg<double>("number").CastUsing(SqrtFromStr);
-  parser.ParseArgs({"binary", "--number", "64"});
-  ASSERT_TRUE(number);
-  EXPECT_EQ(*number, 8);
 }
 
 TEST(Parser, PositionalArgs) {
@@ -224,7 +166,8 @@ TEST(Parser, PositionalArgs) {
   parser.EnableFreeArgs();
   auto string = parser.AddPositionalArg<std::string>();
   auto integer = parser.AddPositionalArg<int>();
-  parser.ParseArgs({"binary", "--number", "64", "free", "args", "go", "here"});
+  parser.ParseArgs(
+      {"binary", "\\--number", "64", "free", "args", "go", "here"});
   ASSERT_TRUE(string);
   EXPECT_EQ(*string, "--number");
   ASSERT_TRUE(integer);
@@ -239,7 +182,7 @@ TEST(Parser, MultiplePositionalArgs) {
       parser.AddPositionalArgs<std::string, int, double>();
   parser.EnableFreeArgs();
   parser.ParseArgs(
-      {"binary", "--number", "64", "3.14", "free", "args", "go", "here"});
+      {"binary", "\\--number", "64", "3.14", "free", "args", "go", "here"});
   ASSERT_TRUE(string);
   EXPECT_EQ(*string, "--number");
   ASSERT_TRUE(integer);
@@ -248,6 +191,58 @@ TEST(Parser, MultiplePositionalArgs) {
   EXPECT_THAT(*number, ::testing::DoubleEq(3.14));
   EXPECT_THAT(parser.FreeArgs(),
               ::testing::ElementsAre("free", "args", "go", "here"));
+}
+
+TEST(Parser, BigExample) {
+  Parser parser;
+  parser.EnableFreeArgs();
+
+  auto command = parser.AddPositionalArg<std::string>().Required();
+  auto rm = parser.AddFlag("rm");
+  auto interactive = parser.AddFlag("interactive", 'i');
+  auto tty = parser.AddFlag("tty", 't');
+  auto verbose = parser.AddFlag("verbose", 'v');
+  auto jobs = parser.AddArg<int>("jobs", 'j').Required();
+  auto name = parser.AddArg<std::string>("name").Required();
+  auto use_something = parser.AddArg<bool>("use-something").Required();
+  auto use_something_else =
+      parser.AddArg<bool>("use-something-else").Required();
+  auto errors = parser.AddFlag("errors", 'e');
+  auto trace = parser.AddFlag("trace", 'x');
+  auto shell_option = parser.AddArg<std::string>("shell-option", 'o');
+  auto [floating_point, integer, str] =
+      parser.AddPositionalArgs<double, int, std::string>();
+
+  auto unused_and_unset_boolean = parser.AddArg<bool>("unused-boolean");
+
+  parser.ParseArgs({"binary", "run", "--rm", "-it", "-vvv", "-j4", "--name",
+                    "name", "--use-something=false",
+                    "--use-something-else=true", "-eo", "pipefail", "2.5", "42",
+                    "\\--something-with-leading-dashes",
+                    "will-not-match-anything"});
+
+  EXPECT_EQ(*command, "run");
+  EXPECT_TRUE(*rm);
+  EXPECT_TRUE(*interactive);
+  EXPECT_TRUE(*tty);
+  EXPECT_EQ(*verbose, 3);
+  EXPECT_EQ(*jobs, 4);
+  EXPECT_EQ(*name, "name");
+  EXPECT_FALSE(*use_something);
+  EXPECT_TRUE(*use_something_else);
+  EXPECT_TRUE(*errors);
+  EXPECT_FALSE(*trace);
+  ASSERT_TRUE(shell_option);
+  EXPECT_EQ(*shell_option, "pipefail");
+  ASSERT_TRUE(floating_point);
+  EXPECT_EQ(*floating_point, 2.5f);
+  ASSERT_TRUE(integer);
+  EXPECT_EQ(*integer, 42);
+  ASSERT_TRUE(str);
+  EXPECT_EQ(*str, "--something-with-leading-dashes");
+  EXPECT_THAT(parser.FreeArgs(),
+              ::testing::ElementsAre("will-not-match-anything"));
+  EXPECT_FALSE(unused_and_unset_boolean);
 }
 
 }  // namespace
