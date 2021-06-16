@@ -25,6 +25,8 @@
 
 namespace argparse {
 
+constexpr char kDefaultHelpString[] = "No help, sorry";
+
 class ArgparseError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
@@ -429,7 +431,7 @@ namespace detail {
 class Holders {
 public:
   FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
-                            const std::string& help = "") {
+                            const std::string& help = kDefaultHelpString) {
     CheckOptionEntry(fullname, shortname);
     UpdateShortLongMapping(fullname, shortname);
     auto holder = std::make_unique<FlagHolder>(fullname, shortname, help);
@@ -440,7 +442,7 @@ public:
 
   template <typename Type>
   ArgHolderWrapper<Type> AddArg(const std::string& fullname, char shortname,
-                                const std::string& help = "") {
+                                const std::string& help = kDefaultHelpString) {
     CheckOptionEntry(fullname, shortname);
     UpdateShortLongMapping(fullname, shortname);
     auto holder = std::make_unique<ArgHolder<Type>>(fullname, shortname, help);
@@ -450,9 +452,9 @@ public:
   }
 
   template <typename Type>
-  MultiArgHolderWrapper<Type> AddMultiArg(const std::string& fullname,
-                                          char shortname,
-                                          const std::string& help = "") {
+  MultiArgHolderWrapper<Type> AddMultiArg(
+      const std::string& fullname, char shortname,
+      const std::string& help = kDefaultHelpString) {
     CheckOptionEntry(fullname, shortname);
     UpdateShortLongMapping(fullname, shortname);
     auto holder =
@@ -506,10 +508,18 @@ public:
     return holders_.size();
   }
 
-  std::vector<std::string> OptionNames() const {
-    std::vector<std::string> result;
-    for (const auto& [name, _] : holders_) {
-      result.push_back(name);
+  struct OptionInfo {
+    std::string_view fullname;
+    char shortname;
+    std::string_view help;
+    bool required;
+  };
+
+  std::vector<OptionInfo> OptionInfos() const {
+    std::vector<OptionInfo> result;
+    for (const auto& [_, holder] : holders_) {
+      result.push_back({holder->fullname(), holder->shortname(), holder->help(),
+                        holder->required()});
     }
 
     return result;
@@ -538,39 +548,40 @@ inline std::string PositionalArgumentName(size_t position) {
 
 }  // namespace detail
 
-inline FlagHolderWrapper AddGlobalFlag(const std::string& fullname,
-                                       char shortname,
-                                       const std::string& help = "") {
+inline FlagHolderWrapper AddGlobalFlag(
+    const std::string& fullname, char shortname,
+    const std::string& help = kDefaultHelpString) {
   return detail::GlobalHolders()->AddFlag(fullname, shortname, help);
 }
 
-inline FlagHolderWrapper AddGlobalFlag(const std::string& fullname,
-                                       const std::string& help = "") {
+inline FlagHolderWrapper AddGlobalFlag(
+    const std::string& fullname, const std::string& help = kDefaultHelpString) {
   return AddGlobalFlag(fullname, '\0', help);
 }
 
 template <typename Type>
-ArgHolderWrapper<Type> AddGlobalArg(const std::string& fullname, char shortname,
-                                    const std::string& help = "") {
+ArgHolderWrapper<Type> AddGlobalArg(
+    const std::string& fullname, char shortname,
+    const std::string& help = kDefaultHelpString) {
   return detail::GlobalHolders()->AddArg<Type>(fullname, shortname, help);
 }
 
 template <typename Type>
-ArgHolderWrapper<Type> AddGlobalArg(const std::string& fullname,
-                                    const std::string& help = "") {
+ArgHolderWrapper<Type> AddGlobalArg(
+    const std::string& fullname, const std::string& help = kDefaultHelpString) {
   return AddGlobalArg<Type>(fullname, '\0', help);
 }
 
 template <typename Type>
-MultiArgHolderWrapper<Type> AddGlobalMultiArg(const std::string& fullname,
-                                              char shortname,
-                                              const std::string& help = "") {
+MultiArgHolderWrapper<Type> AddGlobalMultiArg(
+    const std::string& fullname, char shortname,
+    const std::string& help = kDefaultHelpString) {
   return detail::GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
 }
 
 template <typename Type>
-MultiArgHolderWrapper<Type> AddGlobalMultiArg(const std::string& fullname,
-                                              const std::string& help = "") {
+MultiArgHolderWrapper<Type> AddGlobalMultiArg(
+    const std::string& fullname, const std::string& help = kDefaultHelpString) {
   return AddGlobalMultiArg<Type>(fullname, '\0', help);
 }
 
@@ -585,7 +596,7 @@ public:
       , exit_code_(std::nullopt) {}
 
   FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
-                            const std::string& help = "") {
+                            const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
       detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
@@ -593,13 +604,13 @@ public:
   }
 
   FlagHolderWrapper AddFlag(const std::string& fullname,
-                            const std::string& help = "") {
+                            const std::string& help = kDefaultHelpString) {
     return AddFlag(fullname, '\0', help);
   }
 
   template <typename Type>
   ArgHolderWrapper<Type> AddArg(const std::string& fullname, char shortname,
-                                const std::string& help = "") {
+                                const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
       detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
@@ -608,14 +619,14 @@ public:
 
   template <typename Type>
   ArgHolderWrapper<Type> AddArg(const std::string& fullname,
-                                const std::string& help = "") {
+                                const std::string& help = kDefaultHelpString) {
     return AddArg<Type>(fullname, '\0', help);
   }
 
   template <typename Type>
-  MultiArgHolderWrapper<Type> AddMultiArg(const std::string& fullname,
-                                          char shortname,
-                                          const std::string& help = "") {
+  MultiArgHolderWrapper<Type> AddMultiArg(
+      const std::string& fullname, char shortname,
+      const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
       detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
@@ -623,8 +634,9 @@ public:
   }
 
   template <typename Type>
-  MultiArgHolderWrapper<Type> AddMultiArg(const std::string& fullname,
-                                          const std::string& help = "") {
+  MultiArgHolderWrapper<Type> AddMultiArg(
+      const std::string& fullname,
+      const std::string& help = kDefaultHelpString) {
     return AddMultiArg<Type>(fullname, '\0', help);
   }
 
@@ -647,11 +659,9 @@ public:
     parse_global_args_ = false;
   }
 
-  void ExitOnFailure(int exit_code) {
+  void ExitOnFailure(int exit_code,
+                     std::optional<std::string> usage_string = std::nullopt) {
     exit_code_ = exit_code;
-  }
-
-  void SetUsageString(std::string usage_string) {
     usage_string_ = std::move(usage_string);
   }
 
@@ -828,20 +838,20 @@ private:
   static std::string OptionsDescription(detail::Holders& holders) {
     static const size_t kSecondColumnIndent = 24;
     std::string description;
-    for (auto name : holders.OptionNames()) {
-      ArgHolderBase* holder = holders.GetHolderByFullName(name);
+    for (auto& info : holders.OptionInfos()) {
       std::string line = "  ";
-      if (holder->shortname() != '\0') {
-        line += std::string("-") + holder->shortname() + ", ";
+      if (info.shortname != '\0') {
+        line += std::string("-") + info.shortname + ", ";
       } else {
         line += "    ";
       }
-      line += "--" + holder->fullname() + "        ";
+      line += "--" + std::string(info.fullname.begin(), info.fullname.end()) +
+              "        ";
       for (size_t i = line.length(); i < kSecondColumnIndent; i++) {
         line.push_back(' ');
       }
-      line += holder->help();
-      if (holder->required()) {
+      line += info.help;
+      if (info.required) {
         line += " (required)";
       }
       description += line + "\n";
