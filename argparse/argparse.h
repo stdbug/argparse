@@ -674,7 +674,7 @@ public:
         throw;
       }
       if (usage_string_) {
-        std::cerr << *usage_string_ << "\n";
+        std::cerr << *usage_string_;
       } else {
         std::cerr << "Failed to parse arguments. Error message: "
                   << error.what() << "\n\n";
