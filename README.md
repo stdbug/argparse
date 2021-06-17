@@ -10,12 +10,12 @@ Declare the parser
 argparse::Parser parser;
 ```
 
-Set arguments that may appear in the command line. Each `Add*` method will return
-a holder that can be used to access argument values after they are parsed
+Set arguments that may appear in the command line. Each `Add*` method will
+return a holder that can be used to access argument values after they are parsed
 ```cpp
-// boolean flag, set by mentioning it among command line arguments
-// ("--boolean" or "-b")
-auto boolean = parser.AddFlag("boolean", 'b');
+// flag, set by mentioning it among command line arguments
+// ("--flag" or "-f")
+auto flag = parser.AddFlag("flag", 'f');
 
 // integer value passed by one these ways:
 // --integer 42
@@ -38,18 +38,19 @@ parser.ParseArgs(argc, argv);
 
 Access parsed arguments via `operator*`
 
-No check is required for boolean flags as they only indicate the presence of
-the flag marker in the command line
+No check is required for flags as they only indicate the presence of the flag
+marker in the command line
 ```cpp
-if (*boolean) {
-  std::cout << "boolean was set\n";
+if (*flag) {
+  std::cout << "flag was set " << *flag << " times\n";
 } else {
-  std::cout << "boolean wasn't set\n";
+  std::cout << "flag wasn't set\n";
 }
 ```
 
-For non-boolean flags first check if it was set (unless a default value is set
-or the argument is marked as required, see [below](#default-and-required-values))
+For non-flag arguments first check if it was set (unless a default value is set
+or the argument is marked as required, see
+[below](#default-and-required-values))
 ```cpp
 if (integer) {
   std::cout << "integer was set equal to " << *integer << "\n";
@@ -67,7 +68,7 @@ for (size_t i = 0; i < doubles.Size(); i++) {
 ```
 
 ## Default and required values
-Non-boolean argumens can be marked as required or have a default value
+Non-flag argumens can be marked as required or have a default value
 ```cpp
 auto integer_with_default = parser.AddArg<int>("integer").Default(42);
 auto required_double = parser.AddArg<double>("double").Required();
@@ -98,9 +99,6 @@ parser.AddArg<int>("integer").Default(42).Required();
 
 // same
 parser.AddArg<int>("integer").Required().Default(42);
-
-// Default option is not acceptable
-parser.AddArg<int>("integer").Options({0, 1}).Default(42);
 ```
 
 ## Global args
@@ -116,14 +114,15 @@ ARGPARSE_DECLARE_GLOBAL_ARG(int, integer);
 
 int main(int argc, char* argv[]) {
   argparse::Parser parser;
-  auto local_flag = parser.AddFlag("boolean");
+  auto local_flag = parser.AddFlag("flag");
   parser.ParseArgs(argc, argv);
 
   // use both `local_flag` and `integer` global argument
 }
 ```
 
+## 
+
 # TODO
-* support free arguments starting with a dash
 * range-based access to multiargs
 * support `--help` option
