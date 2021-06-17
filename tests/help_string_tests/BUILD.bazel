@@ -1,0 +1,57 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@bazel_skylib//rules:diff_test.bzl", "diff_test")
+load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+
+cc_binary(
+    name = "binary",
+    srcs = ["main.cpp"],
+    deps = ["//argparse"],
+)
+
+filegroup(
+    name = "expected_default_output",
+    srcs = ["expected_default_output.txt"],
+)
+
+run_binary(
+    name = "default_output",
+    outs = ["default_output.txt"],
+    args = [
+        "--output",
+        "$(location default_output.txt)",
+    ],
+    tool = ":binary",
+)
+
+diff_test(
+    name = "default_output_test",
+    file1 = ":default_output",
+    file2 = ":expected_default_output",
+)
+
+CUSTOM_OUTPUT_CONTENT = "Binary failed!"
+
+write_file(
+    name = "expected_custom_output",
+    out = "expected_custom_output.txt",
+    content = [CUSTOM_OUTPUT_CONTENT],
+)
+
+run_binary(
+    name = "custom_output",
+    outs = ["custom_output.txt"],
+    args = [
+        "--output",
+        "$(location custom_output.txt)",
+        "--helpstring",
+        CUSTOM_OUTPUT_CONTENT,
+    ],
+    tool = ":binary",
+)
+
+diff_test(
+    name = "custom_output_test",
+    file1 = ":custom_output",
+    file2 = ":expected_custom_output",
+)
