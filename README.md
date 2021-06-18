@@ -121,6 +121,12 @@ int main(int argc, char* argv[]) {
 }
 ```
 
+## Errors
+All parsing errors will result in throwing `argparse::ArgparseError`. State of the parser and holders (including globals) in this case is undefined. Optionally, parser may be set to exit the program (via `exit` function)
+```
+parser.ExitOnFailure(exit_code, optional_usage_string);
+```
+
 ## 
 
 # TODO
