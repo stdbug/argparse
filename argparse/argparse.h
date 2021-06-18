@@ -839,7 +839,12 @@ private:
   static std::string OptionsDescription(detail::Holders& holders) {
     static const size_t kSecondColumnIndent = 24;
     std::string description;
-    for (auto& info : holders.OptionInfos()) {
+    auto options = holders.OptionInfos();
+    std::sort(options.begin(), options.end(),
+              [](const auto& opt1, const auto& opt2) {
+                return opt1.fullname < opt2.fullname;
+              });
+    for (auto& info : options) {
       std::string line = "  ";
       if (info.shortname != '\0') {
         line += std::string("-") + info.shortname + ", ";
@@ -870,11 +875,13 @@ private:
     help_string += "\n";
     help_string += "\n";
 
-    help_string += "Options:\n";
     if (parse_global_args_) {
+      help_string += "Global options:\n";
       help_string += OptionsDescription(*detail::GlobalHolders());
+      help_string += "\n";
     }
 
+    help_string += "Options:\n";
     help_string += OptionsDescription(holders_);
 
     return help_string;
