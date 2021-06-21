@@ -407,20 +407,16 @@ public:
     return *this;
   }
 
-  size_t Size() const {
-    return ptr_->values().size();
+  explicit operator bool() const {
+    return !ptr_->values().empty();
   }
 
-  bool Empty() const {
-    return Size() == 0;
-  }
-
-  const Type& operator[](size_t index) const {
-    return ptr_->values()[index];
-  }
-
-  const std::vector<Type>& Values() const {
+  const std::vector<Type>& operator*() const {
     return ptr_->values();
+  }
+
+  const std::vector<Type>* operator->() const {
+    return &ptr_->values();
   }
 
 private:
