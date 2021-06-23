@@ -41,7 +41,7 @@ TEST(Parser, Basic) {
   EXPECT_EQ(*int3, -1);
   EXPECT_TRUE(*bool1);
   EXPECT_FALSE(*bool2);
-  EXPECT_THAT(doubles.Values(),
+  EXPECT_THAT(*doubles,
               ::testing::ElementsAre(::testing::DoubleEq(3.14),
                                      ::testing::DoubleEq(2.71)));
 }
@@ -67,7 +67,7 @@ TEST(Parser, ArgWithDash) {
   auto strings = parser.AddMultiArg<std::string>("string");
   parser.ParseArgs({"binary", "--string=--double-dash", "--string",
                     "-dash=with=equal=signs"});
-  EXPECT_THAT(strings.Values(), ::testing::ElementsAre(
+  EXPECT_THAT(*strings, ::testing::ElementsAre(
                                     "--double-dash", "-dash=with=equal=signs"));
 }
 

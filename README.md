@@ -27,7 +27,7 @@ auto integer = parser.AddArg<int>("integer", 'i');
 // --double 3.14 --double 2.71 --double 1
 auto doubles = parser.AddMultiArg<double>("double", 'd');
 
-// string as-is, but without short option
+// string as-is, but without a short option
 auto string = parser.AddArg<std::string>("string");
 ```
 
@@ -59,11 +59,17 @@ if (integer) {
 }
 ```
 
-Access individual multiarg entries using `operator[]`
+Access individual multiarg entries using range-based for loop or `operator->`
 ```cpp
-std::cout << "doubles were set " << doubles.Size() << " times:\n";
-for (size_t i = 0; i < doubles.Size(); i++) {
-  std::cout << "doubles[" << i << "] = " << doubles[i] << "\n";
+std::cout << "doubles: "
+for (double x : *doubles) {
+  std::cout << x << "\n";
+}
+std::cout << "\n"
+
+std::cout << "doubles were set " << doubles->size() << " times:\n";
+for (size_t i = 0; i < doubles.size(); i++) {
+  std::cout << "doubles[" << i << "] = " << doubles->at(i) << "\n";
 }
 ```
 
@@ -75,9 +81,9 @@ auto required_double = parser.AddArg<double>("double").Required();
 ```
 
 In both of these cases there is no need to check for argument presence. Any
-argument with a default value will hold it even when it's marker is not among
+argument with a default value will hold it even when it's not mentioned among
 `argv`. If no value is provided for a required argument, then `ParseArgs` will
-throw an exception.
+throw an exception
 ```cpp
 std::cout << "integer = " << *integer_with_default << "\n";
 std::cout << "double = " << *required_double << "\n";
@@ -122,13 +128,12 @@ int main(int argc, char* argv[]) {
 ```
 
 ## Errors
-All parsing errors will result in throwing `argparse::ArgparseError`. State of the parser and holders (including globals) in this case is undefined. Optionally, parser may be set to exit the program (via `exit` function)
+All parsing errors will result in throwing `argparse::ArgparseError`. State of
+the parser and holders (including globals) in this case is undefined.
+Optionally, parser may be set to exit the program (via `exit` function)
 ```
 parser.ExitOnFailure(exit_code, optional_usage_string);
 ```
 
-## 
-
 # TODO
-* range-based access to multiargs
 * support `--help` option
