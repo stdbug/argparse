@@ -15,16 +15,18 @@ return a holder that can be used to access argument values after they are parsed
 ```cpp
 // flag, set by mentioning it among command line arguments
 // ("--flag" or "-f")
-auto flag = parser.AddFlag("flag", 'f');
+// can be mentioned multiple times (e.g. "-fff")
+auto flag = parser.AddFlag("flag", 'f', "Optional help string");
 
-// integer value passed by one these ways:
+// integer value passed by one of these ways:
 // --integer 42
 // --integer=42
 // -i 42
-auto integer = parser.AddArg<int>("integer", 'i');
+// -i42
+auto integer = parser.AddArg<int>("integer", 'i', "Some integer");
 
-// argument that may be mentioned multiple times, e.g.
-// --double 3.14 --double 2.71 --double 1
+// argument that may be passed multiple times, e.g.
+// --double 3.14 --double 2.71 --double 1 --double=0,1,2
 auto doubles = parser.AddMultiArg<double>("double", 'd');
 
 // string as-is, but without a short option
@@ -68,13 +70,13 @@ for (double x : *doubles) {
 std::cout << "\n"
 
 std::cout << "doubles were set " << doubles->size() << " times:\n";
-for (size_t i = 0; i < doubles.size(); i++) {
+for (size_t i = 0; i < doubles->size(); i++) {
   std::cout << "doubles[" << i << "] = " << doubles->at(i) << "\n";
 }
 ```
 
 ## Default and required values
-Non-flag argumens can be marked as required or have a default value
+Non-flag arguments can be marked as required or have a default value
 ```cpp
 auto integer_with_default = parser.AddArg<int>("integer").Default(42);
 auto required_double = parser.AddArg<double>("double").Required();
@@ -96,7 +98,7 @@ parser.AddArg<int>("integer").Options({0, 42, 256});
 ```
 
 ## Misusage
-Make sure that provided options are compatible. Some examples of incompatible
+Make sure that provided options are compatible. Examples of incompatible
 options that will result in an exception:
 ```cpp
 // argument with a default value can't be required
