@@ -17,9 +17,11 @@
 #define ARGPARSE_FAIL(msg) ::argparse::detail::NotifyError(msg)
 
 #define ARGPARSE_FAIL_IF(condition, msg) \
-  if (condition) {                       \
-    ARGPARSE_FAIL(msg);                  \
-  }
+  do {                                   \
+    if (condition) {                     \
+      ARGPARSE_FAIL(msg);                \
+    }                                    \
+  } while (0)
 
 #define ARGPARSE_ASSERT(condition) \
   ARGPARSE_FAIL_IF(!(condition), "Argparse internal assumptions failed")
@@ -32,6 +34,9 @@ class ArgparseError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+template <typename Type>
+class TypeTraits;
+
 namespace meta {
 
 struct No {};
@@ -40,9 +45,26 @@ template <typename T>
 No operator==(const T&, const T&);
 
 template <typename T>
-struct EqualExists {
+struct OperatorEqualExists {
   static constexpr bool value =
       !std::is_same_v<decltype(*(T*)(0) == *(T*)(0)), No>;
+};
+
+template <typename Type>
+class TraitsEqualExists {
+public:
+  template <typename U, typename = std::enable_if_t<!std::is_member_pointer_v<
+                            decltype(TypeTraits<U>::Equal)>>>
+  static constexpr bool Exists(int) {
+    return true;
+  }
+
+  template <typename>
+  static constexpr bool Exists(...) {
+    return false;
+  }
+
+  static constexpr bool value = Exists<Type>(0);
 };
 
 }  // namespace meta
@@ -71,8 +93,12 @@ inline std::string EscapeValue(std::string value) {
 }
 
 template <typename T>
-bool Equals(const T& a, const T& b) {
-  if constexpr (meta::EqualExists<T>::value) {
+bool Equal(const T& a, const T& b) {
+  if constexpr (meta::TraitsEqualExists<T>::value) {
+    return TypeTraits<T>::Equal(a, b);
+  }
+
+  if constexpr (meta::OperatorEqualExists<T>::value) {
     return a == b;
   }
 
@@ -85,83 +111,96 @@ template <typename Type>
 bool IsValidValue(const Type& value, const std::vector<Type>& options) {
   return std::any_of(options.begin(), options.end(),
                      [&value](const Type& option) {
-                       return Equals(value, option);
+                       return Equal(value, option);
                      });
 }
 
 }  // namespace detail
 
-template <typename Type>
-Type Cast(const std::string& str);
+template <>
+class TypeTraits<std::string> {
+public:
+  static std::string Cast(const std::string& str) {
+    return str;
+  }
+};
 
 template <>
-inline bool Cast<bool>(const std::string& str) {
-  if (str == "false") {
+class TypeTraits<bool> {
+public:
+  static bool Cast(const std::string& str) {
+    if (str == "false") {
+      return false;
+    }
+    if (str == "true") {
+      return true;
+    }
+    ARGPARSE_FAIL("Failed to cast `" + str + "` to bool");
     return false;
   }
-  if (str == "true") {
-    return true;
+};
+
+template <>
+class TypeTraits<long long int> {
+public:
+  static long long int Cast(const std::string& str) {
+    char* endptr;
+    long long int value = std::strtoll(str.c_str(), &endptr, 10);
+    ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
+                     "Failed to cast `" + str + "` to integer");
+    return value;
   }
-  ARGPARSE_FAIL("Failed to cast `" + str + "` to bool");
-  return false;
-}
+};
 
 template <>
-inline long long int Cast<long long int>(const std::string& str) {
-  char* endptr;
-  long long int value = std::strtoll(str.c_str(), &endptr, 10);
-  ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
-                   "Failed to cast `" + str + "` to integer");
-  return value;
-}
-
-template <>
-inline unsigned long long int Cast<unsigned long long int>(
-    const std::string& str) {
-  char* endptr;
-  unsigned long long int value = std::strtoull(str.c_str(), &endptr, 10);
-  ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
-                   "Failed to cast `" + str + "` to unsigned integer");
-  return value;
-}
-
-template <>
-inline long double Cast<long double>(const std::string& str) {
-  char* endptr;
-  long double value = std::strtold(str.c_str(), &endptr);
-  ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
-                   "Failed to cast `" + str + "` to floating point number");
-  return value;
-}
-
-template <>
-inline std::string Cast<std::string>(const std::string& str) {
-  return str;
-}
-
-#define ARGPARSE_DEFINE_CONVERSION(Type, BaseType) \
-  template <>                                      \
-  inline Type Cast<Type>(const std::string& str) { \
-    return static_cast<Type>(Cast<BaseType>(str)); \
+class TypeTraits<unsigned long long int> {
+public:
+  static unsigned long long int Cast(const std::string& str) {
+    char* endptr;
+    long long int value = std::strtoull(str.c_str(), &endptr, 10);
+    ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
+                     "Failed to cast `" + str + "` to unsigned integer");
+    return value;
   }
+};
 
-ARGPARSE_DEFINE_CONVERSION(long int, long long int)
-ARGPARSE_DEFINE_CONVERSION(int, long long int)
-ARGPARSE_DEFINE_CONVERSION(short int, long long int)
-ARGPARSE_DEFINE_CONVERSION(unsigned long int, unsigned long long int)
-ARGPARSE_DEFINE_CONVERSION(unsigned int, unsigned long long int)
-ARGPARSE_DEFINE_CONVERSION(unsigned short int, unsigned long long int)
-ARGPARSE_DEFINE_CONVERSION(double, long double)
-ARGPARSE_DEFINE_CONVERSION(float, long double)
+template <>
+class TypeTraits<long double> {
+public:
+  static long double Cast(const std::string& str) {
+    char* endptr;
+    long double value = std::strtold(str.c_str(), &endptr);
+    ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
+                     "Failed to cast `" + str + "` to floating point number");
+    return value;
+  }
+};
+
+#define ARGPARSE_DEFINE_TRAITS(Type, BaseType)                   \
+  template <>                                                    \
+  class TypeTraits<Type> {                                       \
+  public:                                                        \
+    static Type Cast(const std::string& str) {                   \
+      return static_cast<Type>(TypeTraits<BaseType>::Cast(str)); \
+    }                                                            \
+  };
+
+ARGPARSE_DEFINE_TRAITS(long int, long long int)
+ARGPARSE_DEFINE_TRAITS(int, long long int)
+ARGPARSE_DEFINE_TRAITS(short int, long long int)
+ARGPARSE_DEFINE_TRAITS(unsigned long int, unsigned long long int)
+ARGPARSE_DEFINE_TRAITS(unsigned int, unsigned long long int)
+ARGPARSE_DEFINE_TRAITS(unsigned short int, unsigned long long int)
+ARGPARSE_DEFINE_TRAITS(double, long double)
+ARGPARSE_DEFINE_TRAITS(float, long double)
 
 class ArgHolderBase {
 public:
-  ArgHolderBase(std::string fullname, char shortname, std::string help,
-                bool required = false)
+  ArgHolderBase(std::string fullname, char shortname, std::string help)
       : fullname_(std::move(fullname))
       , shortname_(shortname)
       , help_(std::move(help))
-      , required_(required) {}
+      , required_(false) {}
 
   virtual ~ArgHolderBase() = default;
 
@@ -171,7 +210,10 @@ public:
   virtual void ProcessFlag() = 0;
   virtual void ProcessValue(const std::string& value_str) = 0;
 
-  const std::string& fullname() const {
+  virtual
+
+      const std::string&
+      fullname() const {
     return fullname_;
   }
   char shortname() const {
@@ -249,7 +291,7 @@ public:
     ARGPARSE_FAIL_IF(HasValue() && !contains_default_,
                      "Argument accepts only one value (`" + fullname() + "`)");
 
-    Type value = Cast<Type>(value_str);
+    Type value = TypeTraits<Type>::Cast(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value (`" +
                          fullname() + "`)");
@@ -268,8 +310,10 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    static_assert(meta::EqualExists<Type>::value,
-                  "No operator== defined for the type of the argument");
+    static_assert(meta::OperatorEqualExists<Type>::value ||
+                      meta::TraitsEqualExists<Type>::value,
+                  "No equality method available to compare values (operator== "
+                  "or TypeTraits::Equal)");
     ARGPARSE_FAIL_IF(options.empty(),
                      "Set of options can't be empty (`" + fullname() + "`)");
     options_ = std::move(options);
@@ -305,7 +349,7 @@ public:
       contains_default_ = false;
     }
 
-    Type value = Cast<Type>(value_str);
+    Type value = TypeTraits<Type>::Cast(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value");
 
@@ -323,8 +367,10 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    static_assert(meta::EqualExists<Type>::value,
-                  "No operator== defined for the type of the argument");
+    static_assert(meta::OperatorEqualExists<Type>::value ||
+                      meta::TraitsEqualExists<Type>::value,
+                  "No equality method available to compare values (operator== "
+                  "or TypeTraits::Equal)");
     ARGPARSE_FAIL_IF(options.empty(),
                      "Set of options can't be empty (`" + fullname() + "`)");
     options_ = std::move(options);
@@ -514,7 +560,8 @@ public:
 
   std::vector<OptionInfo> OptionInfos() const {
     std::vector<OptionInfo> result;
-    for (const auto& [_, holder] : holders_) {
+    for (const auto& [name, holder] : holders_) {
+      (void)name;
       result.push_back({holder->fullname(), holder->shortname(), holder->help(),
                         holder->required()});
     }
@@ -894,8 +941,8 @@ private:
 }  // namespace argparse
 
 #define ARGPARSE_DECLARE_GLOBAL_FLAG(name) \
-  extern ::argparse::FlagHolderWrapper name;
+  extern ::argparse::FlagHolderWrapper name
 #define ARGPARSE_DECLARE_GLOBAL_ARG(Type, name) \
-  extern ::argparse::ArgHolderWrapper<Type> name;
+  extern ::argparse::ArgHolderWrapper<Type> name
 #define ARGPARSE_DECLARE_GLOBAL_MULTIARG(Type, name) \
-  extern ::argparse::MultiArgHolderWrapper<Type> name;
+  extern ::argparse::MultiArgHolderWrapper<Type> name

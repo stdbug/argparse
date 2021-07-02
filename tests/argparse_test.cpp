@@ -13,10 +13,17 @@ struct IntPair {
 };
 
 template <>
-IntPair Cast(const std::string& str) {
-  auto pos = str.find(',');
-  return {std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
-}
+class TypeTraits<IntPair> {
+public:
+  static IntPair Cast(const std::string& str) {
+    auto pos = str.find(',');
+    return {std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
+  }
+
+  static bool Equal(const IntPair& a, const IntPair& b) {
+    return a.x == b.x && a.y == b.y;
+  }
+};
 
 namespace {
 
@@ -41,9 +48,8 @@ TEST(Parser, Basic) {
   EXPECT_EQ(*int3, -1);
   EXPECT_TRUE(*bool1);
   EXPECT_FALSE(*bool2);
-  EXPECT_THAT(*doubles,
-              ::testing::ElementsAre(::testing::DoubleEq(3.14),
-                                     ::testing::DoubleEq(2.71)));
+  EXPECT_THAT(*doubles, ::testing::ElementsAre(::testing::DoubleEq(3.14),
+                                               ::testing::DoubleEq(2.71)));
 }
 
 TEST(Parser, ShortOptions) {
@@ -67,8 +73,8 @@ TEST(Parser, ArgWithDash) {
   auto strings = parser.AddMultiArg<std::string>("string");
   parser.ParseArgs({"binary", "--string=--double-dash", "--string",
                     "-dash=with=equal=signs"});
-  EXPECT_THAT(*strings, ::testing::ElementsAre(
-                                    "--double-dash", "-dash=with=equal=signs"));
+  EXPECT_THAT(*strings, ::testing::ElementsAre("--double-dash",
+                                               "-dash=with=equal=signs"));
 }
 
 TEST(Parser, FreeArgs) {
@@ -155,6 +161,13 @@ TEST(Parser, CustomType) {
   {
     Parser parser;
     auto integers = parser.AddArg<IntPair>("integers");
+    parser.ParseArgs({"binary", "--integers", "1,2"});
+    EXPECT_EQ(integers->x, 1);
+    EXPECT_EQ(integers->y, 2);
+  }
+  {
+    Parser parser;
+    auto integers = parser.AddArg<IntPair>("integers").Options({{1,2}});
     parser.ParseArgs({"binary", "--integers", "1,2"});
     EXPECT_EQ(integers->x, 1);
     EXPECT_EQ(integers->y, 2);
