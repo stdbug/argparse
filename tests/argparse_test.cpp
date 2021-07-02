@@ -7,24 +7,6 @@
 
 namespace argparse {
 
-struct IntPair {
-  int x;
-  int y;
-};
-
-template <>
-class TypeTraits<IntPair> {
-public:
-  static IntPair Cast(const std::string& str) {
-    auto pos = str.find(',');
-    return {std::stoi(str.substr(0, pos)), std::stoi(str.substr(pos + 1))};
-  }
-
-  static bool Equal(const IntPair& a, const IntPair& b) {
-    return a.x == b.x && a.y == b.y;
-  }
-};
-
 namespace {
 
 TEST(Parser, Basic) {
@@ -154,23 +136,6 @@ TEST(Parser, ConfigsIncompatbility) {
     ASSERT_ARGPARSE_ERROR(
         parser.AddMultiArg<int>("integer").Default({5}).Required(),
         "Argument with a default value can't be required");
-  }
-}
-
-TEST(Parser, CustomType) {
-  {
-    Parser parser;
-    auto integers = parser.AddArg<IntPair>("integers");
-    parser.ParseArgs({"binary", "--integers", "1,2"});
-    EXPECT_EQ(integers->x, 1);
-    EXPECT_EQ(integers->y, 2);
-  }
-  {
-    Parser parser;
-    auto integers = parser.AddArg<IntPair>("integers").Options({{1,2}});
-    parser.ParseArgs({"binary", "--integers", "1,2"});
-    EXPECT_EQ(integers->x, 1);
-    EXPECT_EQ(integers->y, 2);
   }
 }
 

@@ -5,6 +5,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -37,39 +38,73 @@ class ArgparseError : public std::runtime_error {
 template <typename Type>
 class TypeTraits;
 
-namespace meta {
-
-struct No {};
-
-template <typename T>
-No operator==(const T&, const T&);
-
-template <typename T>
-struct OperatorEqualExists {
-  static constexpr bool value =
-      !std::is_same_v<decltype(*(T*)(0) == *(T*)(0)), No>;
-};
+namespace detail {
 
 template <typename Type>
-class TraitsEqualExists {
+class TraitsProvider {
 public:
-  template <typename U, typename = std::enable_if_t<!std::is_member_pointer_v<
-                            decltype(TypeTraits<U>::Equal)>>>
-  static constexpr bool Exists(int) {
-    return true;
+  struct NotFound {};
+
+  template <typename T>
+  static auto FindOperatorRightShift(int)
+      -> decltype(*(std::istream*)(0) >> *(T*)(0));
+  template <typename T>
+  static NotFound FindOperatorRightShift(...);
+  static constexpr bool kOperatorRightShiftExists =
+      !std::is_same_v<decltype(FindOperatorRightShift<Type>(0)), NotFound>;
+
+  template <typename T>
+  static auto FindOperatorEqual(int) -> decltype(*(T*)(0) == *(T*)(0));
+  template <typename T>
+  static NotFound FindOperatorEqual(...);
+  static constexpr bool kOperatorEqualExists =
+      !std::is_same_v<decltype(FindOperatorEqual<Type>(0)), NotFound>;
+
+  template <typename T>
+  static auto FindTraitsEqual(int) -> decltype(&TypeTraits<T>::Equal);
+  template <typename T>
+  static NotFound FindTraitsEqual(...);
+  static constexpr bool kTraitsEqualExists =
+      !std::is_same_v<decltype(FindTraitsEqual<Type>(0)), NotFound>;
+
+  template <typename T>
+  static auto FindTraitsCast(int) -> decltype(&TypeTraits<T>::Cast);
+  template <typename T>
+  static NotFound FindTraitsCast(...);
+  static constexpr bool kTraitsCastExists =
+      !std::is_same_v<decltype(FindTraitsCast<Type>(0)), NotFound>;
+
+  static constexpr bool kEqualComparable =
+      kTraitsEqualExists || kOperatorEqualExists;
+
+  static constexpr bool kCastable =
+      kTraitsCastExists || kOperatorRightShiftExists;
+
+  static bool Equal(const Type& a, const Type& b) {
+    static_assert(kEqualComparable,
+                  "No suitable method for values comparison found: neither "
+                  "default operator== nor TypeTraits::Equal is defined");
+    if constexpr (kTraitsEqualExists) {
+      return TypeTraits<Type>::Equal(a, b);
+    } else {
+      return a == b;
+    }
   }
 
-  template <typename>
-  static constexpr bool Exists(...) {
-    return false;
+  static Type Cast(const std::string& str) {
+    static_assert(kCastable,
+                  "No suitable method for values comparison found: neither "
+                  "default operator>> nor TypeTraits::Cast is defined");
+    if constexpr (kTraitsCastExists) {
+      return TypeTraits<Type>::Cast(str);
+    } else {
+      std::istringstream stream(str);
+      Type value;
+      stream >> value;
+      return value;
+    }
   }
-
-  static constexpr bool value = Exists<Type>(0);
 };
-
-}  // namespace meta
-
-namespace detail {
 
 inline void NotifyError(const std::string& msg) {
   throw ::argparse::ArgparseError(msg);
@@ -94,12 +129,8 @@ inline std::string EscapeValue(std::string value) {
 
 template <typename T>
 bool Equal(const T& a, const T& b) {
-  if constexpr (meta::TraitsEqualExists<T>::value) {
-    return TypeTraits<T>::Equal(a, b);
-  }
-
-  if constexpr (meta::OperatorEqualExists<T>::value) {
-    return a == b;
+  if constexpr (TraitsProvider<T>::kEqualComparable) {
+    return TraitsProvider<T>::Equal(a, b);
   }
 
   // should never get here
@@ -210,10 +241,7 @@ public:
   virtual void ProcessFlag() = 0;
   virtual void ProcessValue(const std::string& value_str) = 0;
 
-  virtual
-
-      const std::string&
-      fullname() const {
+  virtual const std::string& fullname() const {
     return fullname_;
   }
   char shortname() const {
@@ -291,7 +319,7 @@ public:
     ARGPARSE_FAIL_IF(HasValue() && !contains_default_,
                      "Argument accepts only one value (`" + fullname() + "`)");
 
-    Type value = TypeTraits<Type>::Cast(value_str);
+    Type value = detail::TraitsProvider<Type>::Cast(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value (`" +
                          fullname() + "`)");
@@ -310,10 +338,8 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    static_assert(meta::OperatorEqualExists<Type>::value ||
-                      meta::TraitsEqualExists<Type>::value,
-                  "No equality method available to compare values (operator== "
-                  "or TypeTraits::Equal)");
+    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
+                  "No equality method available to compare values");
     ARGPARSE_FAIL_IF(options.empty(),
                      "Set of options can't be empty (`" + fullname() + "`)");
     options_ = std::move(options);
@@ -349,7 +375,7 @@ public:
       contains_default_ = false;
     }
 
-    Type value = TypeTraits<Type>::Cast(value_str);
+    Type value = detail::TraitsProvider<Type>::Cast(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value");
 
@@ -367,10 +393,8 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    static_assert(meta::OperatorEqualExists<Type>::value ||
-                      meta::TraitsEqualExists<Type>::value,
-                  "No equality method available to compare values (operator== "
-                  "or TypeTraits::Equal)");
+    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
+                  "No equality method available to compare values");
     ARGPARSE_FAIL_IF(options.empty(),
                      "Set of options can't be empty (`" + fullname() + "`)");
     options_ = std::move(options);
@@ -468,8 +492,6 @@ public:
 private:
   MultiArgHolder<Type>* ptr_;
 };
-
-namespace detail {
 
 class Holders {
 public:
@@ -590,12 +612,10 @@ inline std::string PositionalArgumentName(size_t position) {
   return "__positional_argument__" + std::to_string(position);
 }
 
-}  // namespace detail
-
 inline FlagHolderWrapper AddGlobalFlag(
     const std::string& fullname, char shortname,
     const std::string& help = kDefaultHelpString) {
-  return detail::GlobalHolders()->AddFlag(fullname, shortname, help);
+  return GlobalHolders()->AddFlag(fullname, shortname, help);
 }
 
 inline FlagHolderWrapper AddGlobalFlag(
@@ -607,7 +627,7 @@ template <typename Type>
 ArgHolderWrapper<Type> AddGlobalArg(
     const std::string& fullname, char shortname,
     const std::string& help = kDefaultHelpString) {
-  return detail::GlobalHolders()->AddArg<Type>(fullname, shortname, help);
+  return GlobalHolders()->AddArg<Type>(fullname, shortname, help);
 }
 
 template <typename Type>
@@ -620,7 +640,7 @@ template <typename Type>
 MultiArgHolderWrapper<Type> AddGlobalMultiArg(
     const std::string& fullname, char shortname,
     const std::string& help = kDefaultHelpString) {
-  return detail::GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
+  return GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
 }
 
 template <typename Type>
@@ -642,7 +662,7 @@ public:
   FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
                             const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
-      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+      GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
     return holders_.AddFlag(fullname, shortname, help);
   }
@@ -656,7 +676,7 @@ public:
   ArgHolderWrapper<Type> AddArg(const std::string& fullname, char shortname,
                                 const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
-      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+      GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
     return holders_.AddArg<Type>(fullname, shortname, help);
   }
@@ -672,7 +692,7 @@ public:
       const std::string& fullname, char shortname,
       const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
-      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+      GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
     return holders_.AddMultiArg<Type>(fullname, shortname, help);
   }
@@ -687,7 +707,7 @@ public:
   template <typename Type>
   ArgHolderWrapper<Type> AddPositionalArg() {
     return positionals_.AddArg<Type>(
-        detail::PositionalArgumentName(positionals_.Size()), '\0');
+        PositionalArgumentName(positionals_.Size()), '\0');
   }
 
   template <typename... Types>
@@ -776,7 +796,7 @@ private:
 
   void PerformPostParseCheck() const {
     if (parse_global_args_) {
-      detail::GlobalHolders()->PerformPostParseCheck();
+      GlobalHolders()->PerformPostParseCheck();
     }
 
     holders_.PerformPostParseCheck();
@@ -854,12 +874,12 @@ private:
   }
 
   ArgHolderBase* GetPositionalArgById(size_t id) {
-    return positionals_.GetHolderByFullName(detail::PositionalArgumentName(id));
+    return positionals_.GetHolderByFullName(PositionalArgumentName(id));
   }
 
   ArgHolderBase* GetHolderByFullName(const std::string& fullname) {
     if (parse_global_args_) {
-      auto holder = detail::GlobalHolders()->GetHolderByFullName(fullname);
+      auto holder = GlobalHolders()->GetHolderByFullName(fullname);
       if (holder) {
         return holder;
       }
@@ -870,7 +890,7 @@ private:
 
   ArgHolderBase* GetHolderByShortName(char shortname) {
     if (parse_global_args_) {
-      auto holder = detail::GlobalHolders()->GetHolderByShortName(shortname);
+      auto holder = GlobalHolders()->GetHolderByShortName(shortname);
       if (holder) {
         return holder;
       }
@@ -879,7 +899,7 @@ private:
     return holders_.GetHolderByShortName(shortname);
   }
 
-  static std::string OptionsDescription(detail::Holders& holders) {
+  static std::string OptionsDescription(Holders& holders) {
     static const size_t kSecondColumnIndent = 24;
     std::string description;
     auto options = holders.OptionInfos();
@@ -920,7 +940,7 @@ private:
 
     if (parse_global_args_) {
       help_string += "Global options:\n";
-      help_string += OptionsDescription(*detail::GlobalHolders());
+      help_string += OptionsDescription(*GlobalHolders());
       help_string += "\n";
     }
 
@@ -930,8 +950,8 @@ private:
     return help_string;
   }
 
-  detail::Holders holders_;
-  detail::Holders positionals_;
+  Holders holders_;
+  Holders positionals_;
   std::optional<std::vector<std::string>> free_args_;
   bool parse_global_args_;
   std::optional<std::string> usage_string_;

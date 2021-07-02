@@ -138,4 +138,5 @@ parser.ExitOnFailure(exit_code, optional_usage_string);
 ```
 
 # TODO
+* mode chooser (subparser)
 * support `--help` option
