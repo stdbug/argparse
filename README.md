@@ -136,7 +136,7 @@ public:
   }
 
   // Required only when using Options
-  static bool (const MyType& variable1, const MyType& variable2) {
+  static bool Equal(const MyType& variable1, const MyType& variable2) {
     // implementation
   }
 };
