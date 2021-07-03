@@ -52,8 +52,9 @@ public:
   static constexpr bool constant = constant##IsTrue<Type>::value
 
   ARGPARSE_FIND_FUNCTION(kOperatorRightShiftExists,
-                         *(std::istream*)(0) >> *(T*)(0));
-  ARGPARSE_FIND_FUNCTION(kOperatorEqualExists, *(T*)(0) == *(T*)(0));
+                         std::declval<std::istream&>() >> std::declval<T&>());
+  ARGPARSE_FIND_FUNCTION(kOperatorEqualExists,
+                         std::declval<T>() == std::declval<T>());
   ARGPARSE_FIND_FUNCTION(kTraitsEqualExists, &TypeTraits<T>::Equal);
   ARGPARSE_FIND_FUNCTION(kTraitsCastExists, &TypeTraits<T>::Cast);
 
