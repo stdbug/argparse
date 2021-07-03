@@ -43,36 +43,21 @@ namespace detail {
 template <typename Type>
 class TraitsProvider {
 public:
-  struct NotFound {};
+#define ARGPARSE_FIND_FUNCTION(constant, checker)            \
+  template <typename T, typename = void>                     \
+  struct constant##IsTrue : std::false_type {};              \
+  template <typename T>                                      \
+  struct constant##IsTrue<T, std::void_t<decltype(checker)>> \
+      : std::true_type {};                                   \
+  static constexpr bool constant = constant##IsTrue<Type>::value
 
-  template <typename T>
-  static auto FindOperatorRightShift(int)
-      -> decltype(*(std::istream*)(0) >> *(T*)(0));
-  template <typename T>
-  static NotFound FindOperatorRightShift(...);
-  static constexpr bool kOperatorRightShiftExists =
-      !std::is_same_v<decltype(FindOperatorRightShift<Type>(0)), NotFound>;
+  ARGPARSE_FIND_FUNCTION(kOperatorRightShiftExists,
+                         *(std::istream*)(0) >> *(T*)(0));
+  ARGPARSE_FIND_FUNCTION(kOperatorEqualExists, *(T*)(0) == *(T*)(0));
+  ARGPARSE_FIND_FUNCTION(kTraitsEqualExists, &TypeTraits<T>::Equal);
+  ARGPARSE_FIND_FUNCTION(kTraitsCastExists, &TypeTraits<T>::Cast);
 
-  template <typename T>
-  static auto FindOperatorEqual(int) -> decltype(*(T*)(0) == *(T*)(0));
-  template <typename T>
-  static NotFound FindOperatorEqual(...);
-  static constexpr bool kOperatorEqualExists =
-      !std::is_same_v<decltype(FindOperatorEqual<Type>(0)), NotFound>;
-
-  template <typename T>
-  static auto FindTraitsEqual(int) -> decltype(&TypeTraits<T>::Equal);
-  template <typename T>
-  static NotFound FindTraitsEqual(...);
-  static constexpr bool kTraitsEqualExists =
-      !std::is_same_v<decltype(FindTraitsEqual<Type>(0)), NotFound>;
-
-  template <typename T>
-  static auto FindTraitsCast(int) -> decltype(&TypeTraits<T>::Cast);
-  template <typename T>
-  static NotFound FindTraitsCast(...);
-  static constexpr bool kTraitsCastExists =
-      !std::is_same_v<decltype(FindTraitsCast<Type>(0)), NotFound>;
+#undef ARGPARSE_FIND_FUNCTION
 
   static constexpr bool kEqualComparable =
       kTraitsEqualExists || kOperatorEqualExists;
@@ -224,6 +209,8 @@ ARGPARSE_DEFINE_TRAITS(unsigned int, unsigned long long int)
 ARGPARSE_DEFINE_TRAITS(unsigned short int, unsigned long long int)
 ARGPARSE_DEFINE_TRAITS(double, long double)
 ARGPARSE_DEFINE_TRAITS(float, long double)
+
+#undef ARGPARSE_DEFINE_TRAITS
 
 class ArgHolderBase {
 public:

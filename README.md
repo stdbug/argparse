@@ -97,7 +97,7 @@ A set of valid values can be provided for arguments
 parser.AddArg<int>("integer").Options({0, 42, 256});
 ```
 
-## Misusage
+### Misusage
 Make sure that provided options are compatible. Examples of incompatible
 options that will result in an exception:
 ```cpp
@@ -108,6 +108,51 @@ parser.AddArg<int>("integer").Default(42).Required();
 // same
 parser.AddArg<int>("integer").Required().Default(42);
 ```
+
+## Custom types
+`argparse::Parser` supports parsing built-in numeric types (`float`, `double`,
+`long double`, `short`, `int`, `long`, `long long` and their unsigned versions),
+`bool` and `std::string`. To be able to parse other types one can use C++
+operators or define a specialization of `argparse::TypeTraits` template:
+```cpp
+
+std::istream& operator>>(std::istream& stream, MyType& variable) {
+  // implementation
+}
+
+// Required only when using Options
+bool operator==(const MyType& variable1, const MyType& variable2) {
+  // implementation
+}
+
+namespace argparse {
+
+// TypeTraits specialization will have higher priority over >> and == operators
+template <>
+class TypeTraits<MyType> {
+public:
+  static MyType Cast(const std::string& str) {
+    // implementation
+  }
+
+  // Required only when using Options
+  static bool (const MyType& variable1, const MyType& variable2) {
+    // implementation
+  }
+};
+
+}  // namespace argparse
+
+
+int main(int argc, char* argv[]) {
+  argparse::Parser parser;
+  auto my_var = parser.AddArg<MyType>("my-var");
+  parser.Parse(argc, argv);
+}
+```
+
+A program using `argparse::Parser` with custom types having neither required
+operators nor TypeTraits specialization will not compile
 
 ## Global args
 In order to create a global argument use `argparse::Add*` functions and
