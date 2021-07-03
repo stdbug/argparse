@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
 ```
 
 A program using `argparse::Parser` with custom types having neither required
-operators nor TypeTraits specialization will not compile
+operators nor TypeTraits specialization will fail to compile
 
 ## Global args
 In order to create a global argument use `argparse::Add*` functions and
