@@ -110,10 +110,10 @@ parser.AddArg<int>("integer").Required().Default(42);
 ```
 
 ## Custom types
-`argparse::Parser` supports parsing built-in numeric types (`float`, `double`,
-`long double`, `short`, `int`, `long`, `long long` and their unsigned versions),
-`bool` and `std::string`. To be able to parse other types one can use C++
-operators or define a specialization of `argparse::TypeTraits` template:
+By default, `argparse::Parser` supports parsing built-in numeric types (`float`,
+`double`, `long double`, `short`, `int`, `long`, `long long` and their unsigned
+versions), `bool` and `std::string`. To be able to parse other types one can use
+C++ operators or define a specialization of `argparse::TypeTraits` template:
 ```cpp
 
 std::istream& operator>>(std::istream& stream, MyType& variable) {
