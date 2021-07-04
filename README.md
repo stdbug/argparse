@@ -131,7 +131,7 @@ namespace argparse {
 template <>
 class TypeTraits<MyType> {
 public:
-  static MyType Cast(const std::string& str) {
+  static MyType FromString(const std::string& str) {
     // implementation
   }
 

@@ -56,7 +56,7 @@ public:
   ARGPARSE_FIND_FUNCTION(kOperatorEqualExists,
                          std::declval<T>() == std::declval<T>());
   ARGPARSE_FIND_FUNCTION(kTraitsEqualExists, &TypeTraits<T>::Equal);
-  ARGPARSE_FIND_FUNCTION(kTraitsCastExists, &TypeTraits<T>::Cast);
+  ARGPARSE_FIND_FUNCTION(kTraitsFromStringExists, &TypeTraits<T>::FromString);
 
 #undef ARGPARSE_FIND_FUNCTION
 
@@ -64,7 +64,7 @@ public:
       kTraitsEqualExists || kOperatorEqualExists;
 
   static constexpr bool kCastable =
-      kTraitsCastExists || kOperatorRightShiftExists;
+      kTraitsFromStringExists || kOperatorRightShiftExists;
 
   static bool Equal(const Type& a, const Type& b) {
     static_assert(kEqualComparable,
@@ -77,12 +77,12 @@ public:
     }
   }
 
-  static Type Cast(const std::string& str) {
+  static Type FromString(const std::string& str) {
     static_assert(kCastable,
                   "No suitable method for values comparison found: neither "
-                  "default operator>> nor TypeTraits::Cast is defined");
-    if constexpr (kTraitsCastExists) {
-      return TypeTraits<Type>::Cast(str);
+                  "default operator>> nor TypeTraits::FromString is defined");
+    if constexpr (kTraitsFromStringExists) {
+      return TypeTraits<Type>::FromString(str);
     } else {
       std::istringstream stream(str);
       Type value;
@@ -137,7 +137,7 @@ bool IsValidValue(const Type& value, const std::vector<Type>& options) {
 template <>
 class TypeTraits<std::string> {
 public:
-  static std::string Cast(const std::string& str) {
+  static std::string FromString(const std::string& str) {
     return str;
   }
 };
@@ -145,7 +145,7 @@ public:
 template <>
 class TypeTraits<bool> {
 public:
-  static bool Cast(const std::string& str) {
+  static bool FromString(const std::string& str) {
     if (str == "false") {
       return false;
     }
@@ -160,7 +160,7 @@ public:
 template <>
 class TypeTraits<long long int> {
 public:
-  static long long int Cast(const std::string& str) {
+  static long long int FromString(const std::string& str) {
     char* endptr;
     long long int value = std::strtoll(str.c_str(), &endptr, 10);
     ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
@@ -172,7 +172,7 @@ public:
 template <>
 class TypeTraits<unsigned long long int> {
 public:
-  static unsigned long long int Cast(const std::string& str) {
+  static unsigned long long int FromString(const std::string& str) {
     char* endptr;
     long long int value = std::strtoull(str.c_str(), &endptr, 10);
     ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
@@ -184,7 +184,7 @@ public:
 template <>
 class TypeTraits<long double> {
 public:
-  static long double Cast(const std::string& str) {
+  static long double FromString(const std::string& str) {
     char* endptr;
     long double value = std::strtold(str.c_str(), &endptr);
     ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
@@ -193,13 +193,13 @@ public:
   }
 };
 
-#define ARGPARSE_DEFINE_TRAITS(Type, BaseType)                   \
-  template <>                                                    \
-  class TypeTraits<Type> {                                       \
-  public:                                                        \
-    static Type Cast(const std::string& str) {                   \
-      return static_cast<Type>(TypeTraits<BaseType>::Cast(str)); \
-    }                                                            \
+#define ARGPARSE_DEFINE_TRAITS(Type, BaseType)                         \
+  template <>                                                          \
+  class TypeTraits<Type> {                                             \
+  public:                                                              \
+    static Type FromString(const std::string& str) {                   \
+      return static_cast<Type>(TypeTraits<BaseType>::FromString(str)); \
+    }                                                                  \
   };
 
 ARGPARSE_DEFINE_TRAITS(long int, long long int)
@@ -307,7 +307,7 @@ public:
     ARGPARSE_FAIL_IF(HasValue() && !contains_default_,
                      "Argument accepts only one value (`" + fullname() + "`)");
 
-    Type value = detail::TraitsProvider<Type>::Cast(value_str);
+    Type value = detail::TraitsProvider<Type>::FromString(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value (`" +
                          fullname() + "`)");
@@ -363,7 +363,7 @@ public:
       contains_default_ = false;
     }
 
-    Type value = detail::TraitsProvider<Type>::Cast(value_str);
+    Type value = detail::TraitsProvider<Type>::FromString(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value");
 

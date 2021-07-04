@@ -26,8 +26,8 @@ std::istream& operator>>(std::istream&, StreamReadableAndCastable&) {
 template <>
 class TypeTraits<StreamReadableAndCastable> {
 public:
-  static StreamReadableAndCastable Cast(const std::string& str) {
-    return {TypeTraits<int>::Cast(str)};
+  static StreamReadableAndCastable FromString(const std::string& str) {
+    return {TypeTraits<int>::FromString(str)};
   }
 };
 
@@ -52,8 +52,8 @@ struct Castable {
 template <>
 class TypeTraits<Castable> {
 public:
-  static Castable Cast(const std::string& str) {
-    return {TypeTraits<int>::Cast(str)};
+  static Castable FromString(const std::string& str) {
+    return {TypeTraits<int>::FromString(str)};
   }
 };
 
@@ -69,8 +69,8 @@ struct CastableWithOperatorEqual {
 template <>
 class TypeTraits<CastableWithOperatorEqual> {
 public:
-  static CastableWithOperatorEqual Cast(const std::string& str) {
-    return {TypeTraits<int>::Cast(str)};
+  static CastableWithOperatorEqual FromString(const std::string& str) {
+    return {TypeTraits<int>::FromString(str)};
   }
 };
 
@@ -81,8 +81,8 @@ struct CastableWithTraitsEqual {
 template <>
 class TypeTraits<CastableWithTraitsEqual> {
 public:
-  static CastableWithTraitsEqual Cast(const std::string& str) {
-    return {TypeTraits<int>::Cast(str)};
+  static CastableWithTraitsEqual FromString(const std::string& str) {
+    return {TypeTraits<int>::FromString(str)};
   }
 
   static bool Equal(const CastableWithTraitsEqual& a,
@@ -102,8 +102,8 @@ struct CastableWithOperatorAndTraitsEqual {
 template <>
 class TypeTraits<CastableWithOperatorAndTraitsEqual> {
 public:
-  static CastableWithOperatorAndTraitsEqual Cast(const std::string& str) {
-    return {TypeTraits<int>::Cast(str)};
+  static CastableWithOperatorAndTraitsEqual FromString(const std::string& str) {
+    return {TypeTraits<int>::FromString(str)};
   }
 
   static bool Equal(const CastableWithOperatorAndTraitsEqual& a,
