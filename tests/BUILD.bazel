@@ -11,6 +11,15 @@ cc_test(
 )
 
 cc_test(
+    name = "argparse_custom_types_test",
+    srcs = ["argparse_custom_types_test.cpp"],
+    deps = [
+        "//argparse",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "argparse_global_args_test",
     srcs = ["argparse_global_args_test.cpp"],
     deps = [

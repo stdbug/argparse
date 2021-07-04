@@ -5,6 +5,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -17,9 +18,11 @@
 #define ARGPARSE_FAIL(msg) ::argparse::detail::NotifyError(msg)
 
 #define ARGPARSE_FAIL_IF(condition, msg) \
-  if (condition) {                       \
-    ARGPARSE_FAIL(msg);                  \
-  }
+  do {                                   \
+    if (condition) {                     \
+      ARGPARSE_FAIL(msg);                \
+    }                                    \
+  } while (0)
 
 #define ARGPARSE_ASSERT(condition) \
   ARGPARSE_FAIL_IF(!(condition), "Argparse internal assumptions failed")
@@ -32,22 +35,62 @@ class ArgparseError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-namespace meta {
-
-struct No {};
-
-template <typename T>
-No operator==(const T&, const T&);
-
-template <typename T>
-struct EqualExists {
-  static constexpr bool value =
-      !std::is_same_v<decltype(*(T*)(0) == *(T*)(0)), No>;
-};
-
-}  // namespace meta
+template <typename Type>
+class TypeTraits;
 
 namespace detail {
+
+template <typename Type>
+class TraitsProvider {
+public:
+#define ARGPARSE_FIND_FUNCTION(constant, checker)            \
+  template <typename T, typename = void>                     \
+  struct constant##IsTrue : std::false_type {};              \
+  template <typename T>                                      \
+  struct constant##IsTrue<T, std::void_t<decltype(checker)>> \
+      : std::true_type {};                                   \
+  static constexpr bool constant = constant##IsTrue<Type>::value
+
+  ARGPARSE_FIND_FUNCTION(kOperatorRightShiftExists,
+                         std::declval<std::istream&>() >> std::declval<T&>());
+  ARGPARSE_FIND_FUNCTION(kOperatorEqualExists,
+                         std::declval<T>() == std::declval<T>());
+  ARGPARSE_FIND_FUNCTION(kTraitsEqualExists, &TypeTraits<T>::Equal);
+  ARGPARSE_FIND_FUNCTION(kTraitsFromStringExists, &TypeTraits<T>::FromString);
+
+#undef ARGPARSE_FIND_FUNCTION
+
+  static constexpr bool kEqualComparable =
+      kTraitsEqualExists || kOperatorEqualExists;
+
+  static constexpr bool kCastable =
+      kTraitsFromStringExists || kOperatorRightShiftExists;
+
+  static bool Equal(const Type& a, const Type& b) {
+    static_assert(kEqualComparable,
+                  "No suitable method for values comparison found: neither "
+                  "default operator== nor TypeTraits::Equal is defined");
+    if constexpr (kTraitsEqualExists) {
+      return TypeTraits<Type>::Equal(a, b);
+    } else {
+      return a == b;
+    }
+  }
+
+  static Type FromString(const std::string& str) {
+    static_assert(kCastable,
+                  "No suitable method for values comparison found: neither "
+                  "default operator>> nor TypeTraits::FromString is defined");
+    if constexpr (kTraitsFromStringExists) {
+      return TypeTraits<Type>::FromString(str);
+    } else {
+      std::istringstream stream(str);
+      Type value;
+      stream >> value;
+      return value;
+    }
+  }
+};
 
 inline void NotifyError(const std::string& msg) {
   throw ::argparse::ArgparseError(msg);
@@ -71,9 +114,9 @@ inline std::string EscapeValue(std::string value) {
 }
 
 template <typename T>
-bool Equals(const T& a, const T& b) {
-  if constexpr (meta::EqualExists<T>::value) {
-    return a == b;
+bool Equal(const T& a, const T& b) {
+  if constexpr (TraitsProvider<T>::kEqualComparable) {
+    return TraitsProvider<T>::Equal(a, b);
   }
 
   // should never get here
@@ -85,83 +128,98 @@ template <typename Type>
 bool IsValidValue(const Type& value, const std::vector<Type>& options) {
   return std::any_of(options.begin(), options.end(),
                      [&value](const Type& option) {
-                       return Equals(value, option);
+                       return Equal(value, option);
                      });
 }
 
 }  // namespace detail
 
-template <typename Type>
-Type Cast(const std::string& str);
+template <>
+class TypeTraits<std::string> {
+public:
+  static std::string FromString(const std::string& str) {
+    return str;
+  }
+};
 
 template <>
-inline bool Cast<bool>(const std::string& str) {
-  if (str == "false") {
+class TypeTraits<bool> {
+public:
+  static bool FromString(const std::string& str) {
+    if (str == "false") {
+      return false;
+    }
+    if (str == "true") {
+      return true;
+    }
+    ARGPARSE_FAIL("Failed to cast `" + str + "` to bool");
     return false;
   }
-  if (str == "true") {
-    return true;
+};
+
+template <>
+class TypeTraits<long long int> {
+public:
+  static long long int FromString(const std::string& str) {
+    char* endptr;
+    long long int value = std::strtoll(str.c_str(), &endptr, 10);
+    ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
+                     "Failed to cast `" + str + "` to integer");
+    return value;
   }
-  ARGPARSE_FAIL("Failed to cast `" + str + "` to bool");
-  return false;
-}
+};
 
 template <>
-inline long long int Cast<long long int>(const std::string& str) {
-  char* endptr;
-  long long int value = std::strtoll(str.c_str(), &endptr, 10);
-  ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
-                   "Failed to cast `" + str + "` to integer");
-  return value;
-}
-
-template <>
-inline unsigned long long int Cast<unsigned long long int>(
-    const std::string& str) {
-  char* endptr;
-  unsigned long long int value = std::strtoull(str.c_str(), &endptr, 10);
-  ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
-                   "Failed to cast `" + str + "` to unsigned integer");
-  return value;
-}
-
-template <>
-inline long double Cast<long double>(const std::string& str) {
-  char* endptr;
-  long double value = std::strtold(str.c_str(), &endptr);
-  ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
-                   "Failed to cast `" + str + "` to floating point number");
-  return value;
-}
-
-template <>
-inline std::string Cast<std::string>(const std::string& str) {
-  return str;
-}
-
-#define ARGPARSE_DEFINE_CONVERSION(Type, BaseType) \
-  template <>                                      \
-  inline Type Cast<Type>(const std::string& str) { \
-    return static_cast<Type>(Cast<BaseType>(str)); \
+class TypeTraits<unsigned long long int> {
+public:
+  static unsigned long long int FromString(const std::string& str) {
+    char* endptr;
+    long long int value = std::strtoull(str.c_str(), &endptr, 10);
+    ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
+                     "Failed to cast `" + str + "` to unsigned integer");
+    return value;
   }
+};
 
-ARGPARSE_DEFINE_CONVERSION(long int, long long int)
-ARGPARSE_DEFINE_CONVERSION(int, long long int)
-ARGPARSE_DEFINE_CONVERSION(short int, long long int)
-ARGPARSE_DEFINE_CONVERSION(unsigned long int, unsigned long long int)
-ARGPARSE_DEFINE_CONVERSION(unsigned int, unsigned long long int)
-ARGPARSE_DEFINE_CONVERSION(unsigned short int, unsigned long long int)
-ARGPARSE_DEFINE_CONVERSION(double, long double)
-ARGPARSE_DEFINE_CONVERSION(float, long double)
+template <>
+class TypeTraits<long double> {
+public:
+  static long double FromString(const std::string& str) {
+    char* endptr;
+    long double value = std::strtold(str.c_str(), &endptr);
+    ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
+                     "Failed to cast `" + str + "` to floating point number");
+    return value;
+  }
+};
+
+#define ARGPARSE_DEFINE_TRAITS(Type, BaseType)                         \
+  template <>                                                          \
+  class TypeTraits<Type> {                                             \
+  public:                                                              \
+    static Type FromString(const std::string& str) {                   \
+      return static_cast<Type>(TypeTraits<BaseType>::FromString(str)); \
+    }                                                                  \
+  };
+
+ARGPARSE_DEFINE_TRAITS(long int, long long int)
+ARGPARSE_DEFINE_TRAITS(int, long long int)
+ARGPARSE_DEFINE_TRAITS(short int, long long int)
+ARGPARSE_DEFINE_TRAITS(unsigned long int, unsigned long long int)
+ARGPARSE_DEFINE_TRAITS(unsigned int, unsigned long long int)
+ARGPARSE_DEFINE_TRAITS(unsigned short int, unsigned long long int)
+ARGPARSE_DEFINE_TRAITS(double, long double)
+ARGPARSE_DEFINE_TRAITS(float, long double)
+
+#undef ARGPARSE_DEFINE_TRAITS
 
 class ArgHolderBase {
 public:
-  ArgHolderBase(std::string fullname, char shortname, std::string help,
-                bool required = false)
+  ArgHolderBase(std::string fullname, char shortname, std::string help)
       : fullname_(std::move(fullname))
       , shortname_(shortname)
       , help_(std::move(help))
-      , required_(required) {}
+      , required_(false) {}
 
   virtual ~ArgHolderBase() = default;
 
@@ -171,7 +229,7 @@ public:
   virtual void ProcessFlag() = 0;
   virtual void ProcessValue(const std::string& value_str) = 0;
 
-  const std::string& fullname() const {
+  virtual const std::string& fullname() const {
     return fullname_;
   }
   char shortname() const {
@@ -249,7 +307,7 @@ public:
     ARGPARSE_FAIL_IF(HasValue() && !contains_default_,
                      "Argument accepts only one value (`" + fullname() + "`)");
 
-    Type value = Cast<Type>(value_str);
+    Type value = detail::TraitsProvider<Type>::FromString(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value (`" +
                          fullname() + "`)");
@@ -268,8 +326,8 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    static_assert(meta::EqualExists<Type>::value,
-                  "No operator== defined for the type of the argument");
+    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
+                  "No equality method available to compare values");
     ARGPARSE_FAIL_IF(options.empty(),
                      "Set of options can't be empty (`" + fullname() + "`)");
     options_ = std::move(options);
@@ -305,7 +363,7 @@ public:
       contains_default_ = false;
     }
 
-    Type value = Cast<Type>(value_str);
+    Type value = detail::TraitsProvider<Type>::FromString(value_str);
     ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
                      "Provided argument string casts to an illegal value");
 
@@ -323,8 +381,8 @@ public:
   }
 
   void set_options(std::vector<Type> options) {
-    static_assert(meta::EqualExists<Type>::value,
-                  "No operator== defined for the type of the argument");
+    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
+                  "No equality method available to compare values");
     ARGPARSE_FAIL_IF(options.empty(),
                      "Set of options can't be empty (`" + fullname() + "`)");
     options_ = std::move(options);
@@ -423,8 +481,6 @@ private:
   MultiArgHolder<Type>* ptr_;
 };
 
-namespace detail {
-
 class Holders {
 public:
   FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
@@ -514,7 +570,8 @@ public:
 
   std::vector<OptionInfo> OptionInfos() const {
     std::vector<OptionInfo> result;
-    for (const auto& [_, holder] : holders_) {
+    for (const auto& [name, holder] : holders_) {
+      (void)name;
       result.push_back({holder->fullname(), holder->shortname(), holder->help(),
                         holder->required()});
     }
@@ -543,12 +600,10 @@ inline std::string PositionalArgumentName(size_t position) {
   return "__positional_argument__" + std::to_string(position);
 }
 
-}  // namespace detail
-
 inline FlagHolderWrapper AddGlobalFlag(
     const std::string& fullname, char shortname,
     const std::string& help = kDefaultHelpString) {
-  return detail::GlobalHolders()->AddFlag(fullname, shortname, help);
+  return GlobalHolders()->AddFlag(fullname, shortname, help);
 }
 
 inline FlagHolderWrapper AddGlobalFlag(
@@ -560,7 +615,7 @@ template <typename Type>
 ArgHolderWrapper<Type> AddGlobalArg(
     const std::string& fullname, char shortname,
     const std::string& help = kDefaultHelpString) {
-  return detail::GlobalHolders()->AddArg<Type>(fullname, shortname, help);
+  return GlobalHolders()->AddArg<Type>(fullname, shortname, help);
 }
 
 template <typename Type>
@@ -573,7 +628,7 @@ template <typename Type>
 MultiArgHolderWrapper<Type> AddGlobalMultiArg(
     const std::string& fullname, char shortname,
     const std::string& help = kDefaultHelpString) {
-  return detail::GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
+  return GlobalHolders()->AddMultiArg<Type>(fullname, shortname, help);
 }
 
 template <typename Type>
@@ -595,7 +650,7 @@ public:
   FlagHolderWrapper AddFlag(const std::string& fullname, char shortname,
                             const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
-      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+      GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
     return holders_.AddFlag(fullname, shortname, help);
   }
@@ -609,7 +664,7 @@ public:
   ArgHolderWrapper<Type> AddArg(const std::string& fullname, char shortname,
                                 const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
-      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+      GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
     return holders_.AddArg<Type>(fullname, shortname, help);
   }
@@ -625,7 +680,7 @@ public:
       const std::string& fullname, char shortname,
       const std::string& help = kDefaultHelpString) {
     if (parse_global_args_) {
-      detail::GlobalHolders()->CheckOptionEntry(fullname, shortname);
+      GlobalHolders()->CheckOptionEntry(fullname, shortname);
     }
     return holders_.AddMultiArg<Type>(fullname, shortname, help);
   }
@@ -640,7 +695,7 @@ public:
   template <typename Type>
   ArgHolderWrapper<Type> AddPositionalArg() {
     return positionals_.AddArg<Type>(
-        detail::PositionalArgumentName(positionals_.Size()), '\0');
+        PositionalArgumentName(positionals_.Size()), '\0');
   }
 
   template <typename... Types>
@@ -729,7 +784,7 @@ private:
 
   void PerformPostParseCheck() const {
     if (parse_global_args_) {
-      detail::GlobalHolders()->PerformPostParseCheck();
+      GlobalHolders()->PerformPostParseCheck();
     }
 
     holders_.PerformPostParseCheck();
@@ -807,12 +862,12 @@ private:
   }
 
   ArgHolderBase* GetPositionalArgById(size_t id) {
-    return positionals_.GetHolderByFullName(detail::PositionalArgumentName(id));
+    return positionals_.GetHolderByFullName(PositionalArgumentName(id));
   }
 
   ArgHolderBase* GetHolderByFullName(const std::string& fullname) {
     if (parse_global_args_) {
-      auto holder = detail::GlobalHolders()->GetHolderByFullName(fullname);
+      auto holder = GlobalHolders()->GetHolderByFullName(fullname);
       if (holder) {
         return holder;
       }
@@ -823,7 +878,7 @@ private:
 
   ArgHolderBase* GetHolderByShortName(char shortname) {
     if (parse_global_args_) {
-      auto holder = detail::GlobalHolders()->GetHolderByShortName(shortname);
+      auto holder = GlobalHolders()->GetHolderByShortName(shortname);
       if (holder) {
         return holder;
       }
@@ -832,7 +887,7 @@ private:
     return holders_.GetHolderByShortName(shortname);
   }
 
-  static std::string OptionsDescription(detail::Holders& holders) {
+  static std::string OptionsDescription(Holders& holders) {
     static const size_t kSecondColumnIndent = 24;
     std::string description;
     auto options = holders.OptionInfos();
@@ -873,7 +928,7 @@ private:
 
     if (parse_global_args_) {
       help_string += "Global options:\n";
-      help_string += OptionsDescription(*detail::GlobalHolders());
+      help_string += OptionsDescription(*GlobalHolders());
       help_string += "\n";
     }
 
@@ -883,8 +938,8 @@ private:
     return help_string;
   }
 
-  detail::Holders holders_;
-  detail::Holders positionals_;
+  Holders holders_;
+  Holders positionals_;
   std::optional<std::vector<std::string>> free_args_;
   bool parse_global_args_;
   std::optional<std::string> usage_string_;
@@ -894,8 +949,8 @@ private:
 }  // namespace argparse
 
 #define ARGPARSE_DECLARE_GLOBAL_FLAG(name) \
-  extern ::argparse::FlagHolderWrapper name;
+  extern ::argparse::FlagHolderWrapper name
 #define ARGPARSE_DECLARE_GLOBAL_ARG(Type, name) \
-  extern ::argparse::ArgHolderWrapper<Type> name;
+  extern ::argparse::ArgHolderWrapper<Type> name
 #define ARGPARSE_DECLARE_GLOBAL_MULTIARG(Type, name) \
-  extern ::argparse::MultiArgHolderWrapper<Type> name;
+  extern ::argparse::MultiArgHolderWrapper<Type> name
