@@ -183,5 +183,6 @@ parser.ExitOnFailure(exit_code, optional_usage_string);
 ```
 
 # TODO
+* description for `Options` entries in default help string
 * mode chooser (subparser)
-* support `--help` option
+* `--help` option
