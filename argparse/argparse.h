@@ -286,32 +286,61 @@ private:
 };
 
 template <typename Type>
-class ArgHolder : public ArgHolderBase {
+class ValueHolderBase : public ArgHolderBase {
 public:
-  ArgHolder(std::string fullname, char shortname, std::string help)
-      : ArgHolderBase(fullname, shortname, help) {}
+  using ArgHolderBase::ArgHolderBase;
+
+  virtual bool RequiresValue() const final {
+    return true;
+  }
+
+  virtual void ProcessFlag() override final {
+    ARGPARSE_FAIL("Argument requires a value (`" + this->fullname() + "`)");
+  }
+
+  virtual void ProcessValue(const std::string& value_str) override final {
+    Type value = detail::TraitsProvider<Type>::FromString(value_str);
+    ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
+                     "Provided argument string casts to an illegal value (`" +
+                         this->fullname() + "`)");
+
+    StoreValue(std::move(value));
+  }
+
+  virtual void StoreValue(Type value) = 0;
+
+  void set_options(std::vector<Type> options) {
+    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
+                  "No equality method available to compare values");
+    ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty (`" +
+                                          this->fullname() + "`)");
+    options_ = std::move(options);
+  }
+
+private:
+  std::optional<std::vector<Type>> options_;
+};
+
+template <typename Type>
+class ValueHolder : public ValueHolderBase<Type> {
+public:
+  using ValueHolderBase<Type>::ValueHolderBase;
 
   virtual bool HasValue() const override {
     return value_.has_value();
   }
 
-  virtual bool RequiresValue() const override {
-    return true;
+  virtual void StoreValue(Type value) override {
+    ARGPARSE_FAIL_IF(
+        HasValue() && !contains_default_,
+        "Argument accepts only one value (`" + this->fullname() + "`)");
+
+    value_ = std::move(value);
   }
 
-  virtual void ProcessFlag() override {
-    ARGPARSE_FAIL("Argument requires a value (`" + fullname() + "`)");
-  }
-
-  virtual void ProcessValue(const std::string& value_str) override {
-    ARGPARSE_FAIL_IF(HasValue() && !contains_default_,
-                     "Argument accepts only one value (`" + fullname() + "`)");
-
-    Type value = detail::TraitsProvider<Type>::FromString(value_str);
-    ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
-                     "Provided argument string casts to an illegal value (`" +
-                         fullname() + "`)");
-
+  void set_default(Type value) {
+    ARGPARSE_FAIL_IF(this->required(),
+                     "Required argument can't have a default value");
     value_ = std::move(value);
   }
 
@@ -319,53 +348,25 @@ public:
     return *value_;
   }
 
-  void set_value(Type value) {
-    ARGPARSE_FAIL_IF(required(),
-                     "Required argument can't have a default value");
-    value_ = std::move(value);
-  }
-
-  void set_options(std::vector<Type> options) {
-    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
-                  "No equality method available to compare values");
-    ARGPARSE_FAIL_IF(options.empty(),
-                     "Set of options can't be empty (`" + fullname() + "`)");
-    options_ = std::move(options);
-  }
-
 private:
   std::optional<Type> value_;
-  std::optional<std::vector<Type>> options_;
   bool contains_default_ = true;
 };
 
 template <typename Type>
-class MultiArgHolder : public ArgHolderBase {
+class MultiValueHolder : public ValueHolderBase<Type> {
 public:
-  MultiArgHolder(std::string fullname, char shortname, std::string help)
-      : ArgHolderBase(fullname, shortname, help) {}
+  using ValueHolderBase<Type>::ValueHolderBase;
 
   virtual bool HasValue() const override {
     return !values_.empty();
   }
 
-  virtual bool RequiresValue() const override {
-    return true;
-  }
-
-  virtual void ProcessFlag() override {
-    ARGPARSE_FAIL("This argument requires a value");
-  }
-
-  virtual void ProcessValue(const std::string& value_str) override {
+  virtual void StoreValue(Type value) override {
     if (contains_default_) {
       values_.clear();
       contains_default_ = false;
     }
-
-    Type value = detail::TraitsProvider<Type>::FromString(value_str);
-    ARGPARSE_FAIL_IF(options_ && !detail::IsValidValue(value, *options_),
-                     "Provided argument string casts to an illegal value");
 
     values_.push_back(std::move(value));
   }
@@ -374,23 +375,14 @@ public:
     return values_;
   }
 
-  void set_values(std::vector<Type> values) {
-    ARGPARSE_FAIL_IF(required(),
+  void set_default(std::vector<Type> values) {
+    ARGPARSE_FAIL_IF(this->required(),
                      "Required argument can't have a default value");
     values_ = std::move(values);
   }
 
-  void set_options(std::vector<Type> options) {
-    static_assert(detail::TraitsProvider<Type>::kEqualComparable,
-                  "No equality method available to compare values");
-    ARGPARSE_FAIL_IF(options.empty(),
-                     "Set of options can't be empty (`" + fullname() + "`)");
-    options_ = std::move(options);
-  }
-
 private:
   std::vector<Type> values_;
-  std::optional<std::vector<Type>> options_;
   bool contains_default_ = true;
 };
 
@@ -410,7 +402,7 @@ private:
 template <typename Type>
 class ArgHolderWrapper {
 public:
-  ArgHolderWrapper(ArgHolder<Type>* ptr)
+  ArgHolderWrapper(ValueHolder<Type>* ptr)
       : ptr_(ptr) {}
 
   ArgHolderWrapper& Required() {
@@ -419,7 +411,7 @@ public:
   }
 
   ArgHolderWrapper& Default(Type value) {
-    ptr_->set_value(std::move(value));
+    ptr_->set_default(std::move(value));
     return *this;
   }
 
@@ -441,13 +433,13 @@ public:
   }
 
 private:
-  ArgHolder<Type>* ptr_;
+  ValueHolder<Type>* ptr_;
 };
 
 template <typename Type>
 class MultiArgHolderWrapper {
 public:
-  MultiArgHolderWrapper(MultiArgHolder<Type>* ptr)
+  MultiArgHolderWrapper(MultiValueHolder<Type>* ptr)
       : ptr_(ptr) {}
 
   MultiArgHolderWrapper& Required() {
@@ -456,7 +448,7 @@ public:
   }
 
   MultiArgHolderWrapper& Default(std::vector<Type> values) {
-    ptr_->set_values(std::move(values));
+    ptr_->set_default(std::move(values));
     return *this;
   }
 
@@ -478,7 +470,7 @@ public:
   }
 
 private:
-  MultiArgHolder<Type>* ptr_;
+  MultiValueHolder<Type>* ptr_;
 };
 
 class Holders {
@@ -498,7 +490,8 @@ public:
                                 const std::string& help = kDefaultHelpString) {
     CheckOptionEntry(fullname, shortname);
     UpdateShortLongMapping(fullname, shortname);
-    auto holder = std::make_unique<ArgHolder<Type>>(fullname, shortname, help);
+    auto holder =
+        std::make_unique<ValueHolder<Type>>(fullname, shortname, help);
     ArgHolderWrapper<Type> wrapper(holder.get());
     holders_[fullname] = std::move(holder);
     return wrapper;
@@ -511,7 +504,7 @@ public:
     CheckOptionEntry(fullname, shortname);
     UpdateShortLongMapping(fullname, shortname);
     auto holder =
-        std::make_unique<MultiArgHolder<Type>>(fullname, shortname, help);
+        std::make_unique<MultiValueHolder<Type>>(fullname, shortname, help);
     MultiArgHolderWrapper<Type> wrapper(holder.get());
     holders_[fullname] = std::move(holder);
     return wrapper;

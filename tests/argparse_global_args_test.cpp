@@ -24,9 +24,8 @@ TEST(Parser, GlobalArgs) {
   EXPECT_TRUE(*::boolean);
   ASSERT_TRUE(::integer);
   EXPECT_EQ(*::integer, 42);
-  EXPECT_THAT(*::doubles,
-              ::testing::ElementsAre(::testing::DoubleEq(2.71),
-                                     ::testing::DoubleEq(3.14)));
+  EXPECT_THAT(*::doubles, ::testing::ElementsAre(::testing::DoubleEq(2.71),
+                                                 ::testing::DoubleEq(3.14)));
 }
 
 TEST(Parser, IgnoreGlobalFlags) {
