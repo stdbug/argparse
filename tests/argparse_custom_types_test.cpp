@@ -114,50 +114,54 @@ public:
 
 namespace {
 
-TEST(Parser, CustomTypes) {
-  {
-    Parser parser;
-    auto var = parser.AddArg<StreamReadable>("var");
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
-  {
-    Parser parser;
-    auto var = parser.AddArg<StreamReadableAndCastable>("var");
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
-  {
-    Parser parser;
-    auto var = parser.AddArg<StreamReadableAndComparable>("var").Options({{1}});
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
-  {
-    Parser parser;
-    auto var = parser.AddArg<Castable>("var");
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
-  {
-    Parser parser;
-    auto var = parser.AddArg<CastableWithOperatorEqual>("var").Options({{1}});
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
-  {
-    Parser parser;
-    auto var = parser.AddArg<CastableWithTraitsEqual>("var").Options({{1}});
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
-  {
-    Parser parser;
-    auto var =
-        parser.AddArg<CastableWithOperatorAndTraitsEqual>("var").Options({{1}});
-    parser.ParseArgs({"binary", "--var", "1"});
-    EXPECT_EQ(var->value, 1);
-  }
+TEST(CustomTypes, StreamReadable) {
+  Parser parser;
+  auto var = parser.AddArg<StreamReadable>("var");
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
+}
+
+TEST(CustomTypes, StreamReadableAndCastable) {
+  Parser parser;
+  auto var = parser.AddArg<StreamReadableAndCastable>("var");
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
+}
+
+TEST(CustomTypes, StreamReadableAndComparable) {
+  Parser parser;
+  auto var = parser.AddArg<StreamReadableAndComparable>("var").Options({{1}});
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
+}
+
+TEST(CustomTypes, Castable) {
+  Parser parser;
+  auto var = parser.AddArg<Castable>("var");
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
+}
+
+TEST(CustomTypes, CastableWithOperatorEqual) {
+  Parser parser;
+  auto var = parser.AddArg<CastableWithOperatorEqual>("var").Options({{1}});
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
+}
+
+TEST(CustomTypes, CastableWithTraitsEqual) {
+  Parser parser;
+  auto var = parser.AddArg<CastableWithTraitsEqual>("var").Options({{1}});
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
+}
+
+TEST(CustomTypes, CastableWithOperatorAndTraitsEqual) {
+  Parser parser;
+  auto var =
+      parser.AddArg<CastableWithOperatorAndTraitsEqual>("var").Options({{1}});
+  parser.ParseArgs({"binary", "--var", "1"});
+  EXPECT_EQ(var->value, 1);
 }
 
 }  // namespace
