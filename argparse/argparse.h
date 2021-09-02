@@ -51,20 +51,28 @@ public:
       : std::true_type {};                                   \
   static constexpr bool constant = constant##IsTrue<Type>::value
 
-  ARGPARSE_FIND_FUNCTION(kOperatorRightShiftExists,
-                         std::declval<std::istream&>() >> std::declval<T&>());
   ARGPARSE_FIND_FUNCTION(kOperatorEqualExists,
                          std::declval<T>() == std::declval<T>());
   ARGPARSE_FIND_FUNCTION(kTraitsEqualExists, &TypeTraits<T>::Equal);
+
   ARGPARSE_FIND_FUNCTION(kTraitsFromStringExists, &TypeTraits<T>::FromString);
+  ARGPARSE_FIND_FUNCTION(kOperatorRightShiftExists,
+                         std::declval<std::istream&>() >> std::declval<T&>());
+
+  ARGPARSE_FIND_FUNCTION(kTraitsToStringExists, &TypeTraits<T>::ToString);
+  ARGPARSE_FIND_FUNCTION(kOperatorLeftShiftExists,
+                         std::declval<std::istream&>() >> std::declval<T&>());
 
 #undef ARGPARSE_FIND_FUNCTION
 
   static constexpr bool kEqualComparable =
       kTraitsEqualExists || kOperatorEqualExists;
 
-  static constexpr bool kCastable =
+  static constexpr bool kFromStringCastable =
       kTraitsFromStringExists || kOperatorRightShiftExists;
+
+  static constexpr bool kToStringCastable =
+      kTraitsToStringExists || kOperatorLeftShiftExists;
 
   static bool Equal(const Type& a, const Type& b) {
     static_assert(kEqualComparable,
@@ -78,9 +86,8 @@ public:
   }
 
   static Type FromString(const std::string& str) {
-    static_assert(kCastable,
-                  "No suitable method for values comparison found: neither "
-                  "default operator>> nor TypeTraits::FromString is defined");
+    static_assert(kFromStringCastable,
+                  "No suitable method to cast a string to value found: neither default operator>> nor TypeTraits::FromString is defined");
     if constexpr (kTraitsFromStringExists) {
       return TypeTraits<Type>::FromString(str);
     } else {
@@ -88,6 +95,18 @@ public:
       Type value;
       stream >> value;
       return value;
+    }
+  }
+
+  static std::string ToString(const Type& value) {
+    static_assert(kToStringCastable,
+                  "No suitable method to cast a value to string found: neither default operator<< nor TypeTraits::ToString is defined");
+    if constexpr (kTraitsToStringExists) {
+      return TypeTraits<Type>::ToString(value);
+    } else {
+      std::ostringstream stream;
+      stream << value;
+      return stream.str();
     }
   }
 };
@@ -140,6 +159,10 @@ public:
   static std::string FromString(const std::string& str) {
     return str;
   }
+
+  static std::string ToString(const std::string& str) {
+    return str;
+  }
 };
 
 template <>
@@ -154,6 +177,10 @@ public:
     }
     ARGPARSE_FAIL("Failed to cast `" + str + "` to bool");
     return false;
+  }
+
+  static std::string ToString(const bool& value) {
+    return value ? "true" : "false";
   }
 };
 
@@ -213,6 +240,15 @@ ARGPARSE_DEFINE_TRAITS(float, long double)
 
 #undef ARGPARSE_DEFINE_TRAITS
 
+struct OptionInfo {
+  std::string fullname;
+  char shortname;
+  std::string help;
+  bool required;
+  std::optional<std::string> default_value;
+  std::optional<std::vector<std::string>> options;
+};
+
 class ArgHolderBase {
 public:
   ArgHolderBase(std::string fullname, char shortname, std::string help)
@@ -247,6 +283,8 @@ public:
     return required_;
   }
 
+  virtual OptionInfo RichOptionInfo() const = 0;
+
 private:
   std::string fullname_;
   char shortname_;
@@ -258,7 +296,8 @@ class FlagHolder : public ArgHolderBase {
 public:
   FlagHolder(std::string fullname, char shortname, std::string help)
       : ArgHolderBase(fullname, shortname, help)
-      , value_(0) {}
+      , value_(0)
+      , max_value_(std::numeric_limits<size_t>::max()) {}
 
   virtual bool HasValue() const override {
     return true;
@@ -269,20 +308,38 @@ public:
   }
 
   virtual void ProcessFlag() override {
+    ARGPARSE_FAIL_IF(value_ >= max_value_, "Flag has been set more than allowed times (`" + this->fullname() + "`)")
     value_++;
   }
 
   virtual void ProcessValue(const std::string& value_str) override {
     (void)value_str;
-    ARGPARSE_FAIL("Flags don't accept values");
+    ARGPARSE_FAIL("Flags don't accept values (`" + this->fullname() + "`)");
   }
+
+  void SetMaxValue(size_t max_value) {}
 
   size_t value() const {
     return value_;
   }
 
+  virtual  RichOptionInfo() const override {
+    OptionInfo info{
+      .fullname = this->fullname();
+      .shortname = this->shortname();
+      .help = this->help();
+      .required = this->required();
+      std::nullopt,
+      std::nullopt
+    };
+    if (max_value_ < std::numeric_limits<size_t>::max()) {
+      info.options = "0.." + detail::TraitsProvider<size_t>::ToString(max_value_);
+    }
+  }
+
 private:
   size_t value_;
+  size_t max_value_;
 };
 
 template <typename Type>
@@ -327,12 +384,12 @@ public:
   using ValueHolderBase<Type>::ValueHolderBase;
 
   virtual bool HasValue() const override {
-    return value_.has_value();
+    return value_.has_value() || default_value_.has_value();
   }
 
   virtual void StoreValue(Type value) override {
     ARGPARSE_FAIL_IF(
-        HasValue() && !contains_default_,
+        value_.has_value(),
         "Argument accepts only one value (`" + this->fullname() + "`)");
 
     value_ = std::move(value);
@@ -341,15 +398,20 @@ public:
   void set_default(Type value) {
     ARGPARSE_FAIL_IF(this->required(),
                      "Required argument can't have a default value");
-    value_ = std::move(value);
+    default_value_ = std::move(value);
   }
 
   const Type& value() const {
+    ARGPARSE_FAIL_IF(!this->HasValue(), "Trying to obtain a value from an argument that wasn't set (`" + this->fullname() + "`)");
+    if (!value_.has_value()) {
+      return *default_value_;
+    }
     return *value_;
   }
 
 private:
   std::optional<Type> value_;
+  std::optional<Type> default_value_;
   bool contains_default_ = true;
 };
 
@@ -359,31 +421,30 @@ public:
   using ValueHolderBase<Type>::ValueHolderBase;
 
   virtual bool HasValue() const override {
-    return !values_.empty();
+    return !values_.empty() || !default_values_.empty();
   }
 
   virtual void StoreValue(Type value) override {
-    if (contains_default_) {
-      values_.clear();
-      contains_default_ = false;
-    }
-
     values_.push_back(std::move(value));
   }
 
   const std::vector<Type>& values() const {
+    if (values_.empty()) {
+      return default_values_;
+    }
+
     return values_;
   }
 
   void set_default(std::vector<Type> values) {
     ARGPARSE_FAIL_IF(this->required(),
                      "Required argument can't have a default value");
-    values_ = std::move(values);
+    default_values_ = std::move(values);
   }
 
 private:
   std::vector<Type> values_;
-  bool contains_default_ = true;
+  std::vector<Type> default_values_;
 };
 
 class FlagHolderWrapper {
@@ -553,13 +614,6 @@ public:
   size_t Size() const {
     return holders_.size();
   }
-
-  struct OptionInfo {
-    std::string_view fullname;
-    char shortname;
-    std::string_view help;
-    bool required;
-  };
 
   std::vector<OptionInfo> OptionInfos() const {
     std::vector<OptionInfo> result;
