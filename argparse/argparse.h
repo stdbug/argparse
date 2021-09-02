@@ -29,6 +29,22 @@
 
 namespace argparse {
 
+namespace util {
+
+inline std::string JoinStrings(const std::vector<std::string>& parts,
+                               const std::string delimiter) {
+  if (parts.empty()) {
+    return "";
+  }
+  std::string result;
+  for (size_t i = 0; i < parts.size() - 1; i++) {
+    result += parts[i] + delimiter;
+  }
+  return result + parts.back();
+}
+
+}  // namespace util
+
 constexpr char kDefaultHelpString[] = "No help, sorry";
 
 class ArgparseError : public std::runtime_error {
@@ -39,6 +55,10 @@ template <typename Type>
 class TypeTraits;
 
 namespace detail {
+
+inline void NotifyError(const std::string& msg) {
+  throw ::argparse::ArgparseError(msg);
+}
 
 template <typename Type>
 class TraitsProvider {
@@ -60,8 +80,8 @@ public:
                          std::declval<std::istream&>() >> std::declval<T&>());
 
   ARGPARSE_FIND_FUNCTION(kTraitsToStringExists, &TypeTraits<T>::ToString);
-  ARGPARSE_FIND_FUNCTION(kOperatorLeftShiftExists,
-                         std::declval<std::istream&>() >> std::declval<T&>());
+  ARGPARSE_FIND_FUNCTION(kOperatorLeftShiftExists, std::declval<std::ostream&>()
+                                                       << std::declval<T&>());
 
 #undef ARGPARSE_FIND_FUNCTION
 
@@ -87,7 +107,8 @@ public:
 
   static Type FromString(const std::string& str) {
     static_assert(kFromStringCastable,
-                  "No suitable method to cast a string to value found: neither default operator>> nor TypeTraits::FromString is defined");
+                  "No suitable method to cast a string to value found: neither "
+                  "default operator>> nor TypeTraits::FromString is defined");
     if constexpr (kTraitsFromStringExists) {
       return TypeTraits<Type>::FromString(str);
     } else {
@@ -99,21 +120,21 @@ public:
   }
 
   static std::string ToString(const Type& value) {
-    static_assert(kToStringCastable,
-                  "No suitable method to cast a value to string found: neither default operator<< nor TypeTraits::ToString is defined");
     if constexpr (kTraitsToStringExists) {
       return TypeTraits<Type>::ToString(value);
-    } else {
+    }
+
+    if constexpr (kOperatorLeftShiftExists) {
       std::ostringstream stream;
       stream << value;
       return stream.str();
     }
+
+    // should never get here
+    ARGPARSE_ASSERT(false);
+    return {};
   }
 };
-
-inline void NotifyError(const std::string& msg) {
-  throw ::argparse::ArgparseError(msg);
-}
 
 inline std::tuple<std::string, std::optional<std::string>> SplitLongArg(
     const std::string& arg) {
@@ -194,6 +215,9 @@ public:
                      "Failed to cast `" + str + "` to integer");
     return value;
   }
+  static std::string ToString(const long long int& value) {
+    return std::to_string(value);
+  }
 };
 
 template <>
@@ -205,6 +229,9 @@ public:
     ARGPARSE_FAIL_IF(endptr != str.c_str() + str.length(),
                      "Failed to cast `" + str + "` to unsigned integer");
     return value;
+  }
+  static std::string ToString(const unsigned long long int& value) {
+    return std::to_string(value);
   }
 };
 
@@ -218,6 +245,9 @@ public:
                      "Failed to cast `" + str + "` to floating point number");
     return value;
   }
+  static std::string ToString(const long double& value) {
+    return std::to_string(value);
+  }
 };
 
 #define ARGPARSE_DEFINE_TRAITS(Type, BaseType)                         \
@@ -226,6 +256,9 @@ public:
   public:                                                              \
     static Type FromString(const std::string& str) {                   \
       return static_cast<Type>(TypeTraits<BaseType>::FromString(str)); \
+    }                                                                  \
+    static std::string ToString(const Type& value) {                   \
+      return TypeTraits<BaseType>::ToString(value);                    \
     }                                                                  \
   };
 
@@ -246,7 +279,7 @@ struct OptionInfo {
   std::string help;
   bool required;
   std::optional<std::string> default_value;
-  std::optional<std::vector<std::string>> options;
+  std::optional<std::string> options;
 };
 
 class ArgHolderBase {
@@ -283,7 +316,16 @@ public:
     return required_;
   }
 
-  virtual OptionInfo RichOptionInfo() const = 0;
+  virtual OptionInfo RichOptionInfo() const {
+    return OptionInfo{
+        .fullname = this->fullname(),
+        .shortname = this->shortname(),
+        .help = this->help(),
+        .required = this->required(),
+        .default_value = std::nullopt,
+        .options = std::nullopt,
+    };
+  }
 
 private:
   std::string fullname_;
@@ -308,7 +350,9 @@ public:
   }
 
   virtual void ProcessFlag() override {
-    ARGPARSE_FAIL_IF(value_ >= max_value_, "Flag has been set more than allowed times (`" + this->fullname() + "`)")
+    ARGPARSE_FAIL_IF(value_ >= max_value_,
+                     "Flag has been set more than allowed times (`" +
+                         this->fullname() + "`)");
     value_++;
   }
 
@@ -323,18 +367,15 @@ public:
     return value_;
   }
 
-  virtual  RichOptionInfo() const override {
-    OptionInfo info{
-      .fullname = this->fullname();
-      .shortname = this->shortname();
-      .help = this->help();
-      .required = this->required();
-      std::nullopt,
-      std::nullopt
-    };
+  virtual OptionInfo RichOptionInfo() const override {
+    OptionInfo info = ArgHolderBase::RichOptionInfo();
+    info.default_value = detail::TraitsProvider<size_t>::ToString(0);
     if (max_value_ < std::numeric_limits<size_t>::max()) {
-      info.options = "0.." + detail::TraitsProvider<size_t>::ToString(max_value_);
+      info.options =
+          "0.." + detail::TraitsProvider<size_t>::ToString(max_value_);
     }
+
+    return info;
   }
 
 private:
@@ -369,9 +410,25 @@ public:
   void set_options(std::vector<Type> options) {
     static_assert(detail::TraitsProvider<Type>::kEqualComparable,
                   "No equality method available to compare values");
+    static_assert(detail::TraitsProvider<Type>::kToStringCastable,
+                  "Type of argument is not castable to string");
     ARGPARSE_FAIL_IF(options.empty(), "Set of options can't be empty (`" +
                                           this->fullname() + "`)");
     options_ = std::move(options);
+  }
+
+  virtual OptionInfo RichOptionInfo() const override {
+    OptionInfo info = ArgHolderBase::RichOptionInfo();
+
+    if (options_.has_value()) {
+      std::vector<std::string> option_strings;
+      for (const auto& option : *options_) {
+        option_strings.push_back(
+            detail::TraitsProvider<Type>::ToString(option));
+      }
+      info.options = util::JoinStrings(option_strings, ", ");
+    }
+    return info;
   }
 
 private:
@@ -388,25 +445,39 @@ public:
   }
 
   virtual void StoreValue(Type value) override {
-    ARGPARSE_FAIL_IF(
-        value_.has_value(),
-        "Argument accepts only one value (`" + this->fullname() + "`)");
+    ARGPARSE_FAIL_IF(value_.has_value(), "Argument accepts only one value (`" +
+                                             this->fullname() + "`)");
 
     value_ = std::move(value);
   }
 
   void set_default(Type value) {
+    static_assert(detail::TraitsProvider<Type>::kToStringCastable,
+                  "Type of argument is not castable to string");
     ARGPARSE_FAIL_IF(this->required(),
                      "Required argument can't have a default value");
     default_value_ = std::move(value);
   }
 
   const Type& value() const {
-    ARGPARSE_FAIL_IF(!this->HasValue(), "Trying to obtain a value from an argument that wasn't set (`" + this->fullname() + "`)");
+    ARGPARSE_FAIL_IF(
+        !this->HasValue(),
+        "Trying to obtain a value from an argument that wasn't set (`" +
+            this->fullname() + "`)");
     if (!value_.has_value()) {
       return *default_value_;
     }
     return *value_;
+  }
+
+  virtual OptionInfo RichOptionInfo() const override {
+    OptionInfo info = ValueHolderBase<Type>::RichOptionInfo();
+    if (default_value_) {
+      info.default_value =
+          detail::TraitsProvider<Type>::ToString(*default_value_);
+    }
+
+    return info;
   }
 
 private:
@@ -421,7 +492,7 @@ public:
   using ValueHolderBase<Type>::ValueHolderBase;
 
   virtual bool HasValue() const override {
-    return !values_.empty() || !default_values_.empty();
+    return !values_.empty() || !default_value_.empty();
   }
 
   virtual void StoreValue(Type value) override {
@@ -430,21 +501,38 @@ public:
 
   const std::vector<Type>& values() const {
     if (values_.empty()) {
-      return default_values_;
+      return default_value_;
     }
 
     return values_;
   }
 
-  void set_default(std::vector<Type> values) {
+  void set_default(std::vector<Type> value) {
+    static_assert(detail::TraitsProvider<Type>::kToStringCastable,
+                  "Type of argument is not castable to string");
     ARGPARSE_FAIL_IF(this->required(),
                      "Required argument can't have a default value");
-    default_values_ = std::move(values);
+    default_value_ = std::move(value);
+  }
+
+  virtual OptionInfo RichOptionInfo() const override {
+    OptionInfo info = ValueHolderBase<Type>::RichOptionInfo();
+    if (!default_value_.empty()) {
+      info.default_value = "";
+      for (const auto& value : default_value_) {
+        *info.default_value +=
+            detail::TraitsProvider<Type>::ToString(value) + ", ";
+      }
+      info.default_value->pop_back();
+      info.default_value->pop_back();
+    }
+
+    return info;
   }
 
 private:
   std::vector<Type> values_;
-  std::vector<Type> default_values_;
+  std::vector<Type> default_value_;
 };
 
 class FlagHolderWrapper {
@@ -619,8 +707,7 @@ public:
     std::vector<OptionInfo> result;
     for (const auto& [name, holder] : holders_) {
       (void)name;
-      result.push_back({holder->fullname(), holder->shortname(), holder->help(),
-                        holder->required()});
+      result.push_back(holder->RichOptionInfo());
     }
 
     return result;
@@ -955,8 +1042,18 @@ private:
         line.push_back(' ');
       }
       line += info.help;
-      if (info.required) {
-        line += " (required)";
+      if (info.required || info.default_value || info.options) {
+        std::vector<std::string> parts;
+        if (info.required) {
+          parts.push_back("required");
+        }
+        if (info.default_value) {
+          parts.push_back("default: " + *info.default_value);
+        }
+        if (info.options) {
+          parts.push_back("options: " + *info.options);
+        }
+        line += " (" + util::JoinStrings(parts, ", ") + ")";
       }
       description += line + "\n";
     }
