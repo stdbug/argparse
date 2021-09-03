@@ -56,10 +56,6 @@ class TypeTraits;
 
 namespace detail {
 
-inline void NotifyError(const std::string& msg) {
-  throw ::argparse::ArgparseError(msg);
-}
-
 template <typename Type>
 class TraitsProvider {
 public:
@@ -135,6 +131,10 @@ public:
     return {};
   }
 };
+
+inline void NotifyError(const std::string& msg) {
+  throw ::argparse::ArgparseError(msg);
+}
 
 inline std::tuple<std::string, std::optional<std::string>> SplitLongArg(
     const std::string& arg) {
@@ -280,6 +280,7 @@ struct OptionInfo {
   bool required;
   std::optional<std::string> default_value;
   std::optional<std::string> options;
+  std::optional<std::string> max_occurrences;
 };
 
 class ArgHolderBase {
@@ -338,8 +339,7 @@ class FlagHolder : public ArgHolderBase {
 public:
   FlagHolder(std::string fullname, char shortname, std::string help)
       : ArgHolderBase(fullname, shortname, help)
-      , value_(0)
-      , max_value_(std::numeric_limits<size_t>::max()) {}
+      , value_(0) {}
 
   virtual bool HasValue() const override {
     return true;
@@ -350,9 +350,6 @@ public:
   }
 
   virtual void ProcessFlag() override {
-    ARGPARSE_FAIL_IF(value_ >= max_value_,
-                     "Flag has been set more than allowed times (`" +
-                         this->fullname() + "`)");
     value_++;
   }
 
@@ -361,26 +358,12 @@ public:
     ARGPARSE_FAIL("Flags don't accept values (`" + this->fullname() + "`)");
   }
 
-  void SetMaxValue(size_t max_value) {}
-
   size_t value() const {
     return value_;
   }
 
-  virtual OptionInfo RichOptionInfo() const override {
-    OptionInfo info = ArgHolderBase::RichOptionInfo();
-    info.default_value = detail::TraitsProvider<size_t>::ToString(0);
-    if (max_value_ < std::numeric_limits<size_t>::max()) {
-      info.options =
-          "0.." + detail::TraitsProvider<size_t>::ToString(max_value_);
-    }
-
-    return info;
-  }
-
 private:
   size_t value_;
-  size_t max_value_;
 };
 
 template <typename Type>
