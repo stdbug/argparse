@@ -56,6 +56,10 @@ class TypeTraits;
 
 namespace detail {
 
+inline void NotifyError(const std::string& msg) {
+  throw ::argparse::ArgparseError(msg);
+}
+
 template <typename Type>
 class TraitsProvider {
 public:
@@ -131,10 +135,6 @@ public:
     return {};
   }
 };
-
-inline void NotifyError(const std::string& msg) {
-  throw ::argparse::ArgparseError(msg);
-}
 
 inline std::tuple<std::string, std::optional<std::string>> SplitLongArg(
     const std::string& arg) {
