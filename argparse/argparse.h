@@ -280,7 +280,6 @@ struct OptionInfo {
   bool required;
   std::optional<std::string> default_value;
   std::optional<std::string> options;
-  std::optional<std::string> max_occurrences;
 };
 
 class ArgHolderBase {
