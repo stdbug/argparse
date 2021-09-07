@@ -318,12 +318,12 @@ public:
 
   virtual OptionInfo RichOptionInfo() const {
     return OptionInfo{
-        .fullname = this->fullname(),
-        .shortname = this->shortname(),
-        .help = this->help(),
-        .required = this->required(),
-        .default_value = std::nullopt,
-        .options = std::nullopt,
+        /*.fullname = */this->fullname(),
+        /*.shortname = */this->shortname(),
+        /*.help = */this->help(),
+        /*.required = */this->required(),
+        /*.default_value = */std::nullopt,
+        /*.options = */std::nullopt,
     };
   }
 
