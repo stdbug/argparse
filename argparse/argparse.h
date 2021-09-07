@@ -465,7 +465,6 @@ public:
 private:
   std::optional<Type> value_;
   std::optional<Type> default_value_;
-  bool contains_default_ = true;
 };
 
 template <typename Type>
@@ -474,7 +473,7 @@ public:
   using ValueHolderBase<Type>::ValueHolderBase;
 
   virtual bool HasValue() const override {
-    return !values_.empty() || !default_value_.empty();
+    return !values_.empty() || !default_values_.empty();
   }
 
   virtual void StoreValue(Type value) override {
@@ -483,7 +482,7 @@ public:
 
   const std::vector<Type>& values() const {
     if (values_.empty()) {
-      return default_value_;
+      return default_values_;
     }
 
     return values_;
@@ -494,14 +493,14 @@ public:
                   "Type of argument is not castable to string");
     ARGPARSE_FAIL_IF(this->required(),
                      "Required argument can't have a default value");
-    default_value_ = std::move(value);
+    default_values_ = std::move(value);
   }
 
   virtual OptionInfo RichOptionInfo() const override {
     OptionInfo info = ValueHolderBase<Type>::RichOptionInfo();
-    if (!default_value_.empty()) {
+    if (!default_values_.empty()) {
       info.default_value = "";
-      for (const auto& value : default_value_) {
+      for (const auto& value : default_values_) {
         *info.default_value +=
             detail::TraitsProvider<Type>::ToString(value) + ", ";
       }
@@ -514,7 +513,7 @@ public:
 
 private:
   std::vector<Type> values_;
-  std::vector<Type> default_value_;
+  std::vector<Type> default_values_;
 };
 
 class FlagHolderWrapper {
