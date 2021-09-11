@@ -120,6 +120,11 @@ std::istream& operator>>(std::istream& stream, MyType& variable) {
   // implementation
 }
 
+// Required only when using Options or Default
+std::ostream& operator<<(std::ostream& stream, MyType& variable) {
+  // implementation
+}
+
 // Required only when using Options
 bool operator==(const MyType& variable1, const MyType& variable2) {
   // implementation
@@ -135,6 +140,11 @@ public:
     // implementation
   }
 
+  // Required only when using Options or Default
+  static std::string ToString(const MyType& my_var) {
+    // implementation
+  }
+
   // Required only when using Options
   static bool Equal(const MyType& variable1, const MyType& variable2) {
     // implementation
@@ -146,7 +156,7 @@ public:
 
 int main(int argc, char* argv[]) {
   argparse::Parser parser;
-  auto my_var = parser.AddArg<MyType>("my-var");
+  auto my_var = parser.AddArg<MyType>("my-var").Default(MyType()).Options({MyType(1), MyType(2)});
   parser.Parse(argc, argv);
 }
 ```
