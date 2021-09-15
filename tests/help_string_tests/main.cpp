@@ -19,8 +19,12 @@ int main(int argc, char* argv[]) {
   argparse::Parser test_parser;
   test_parser.AddPositionalArg<float>();
   test_parser.AddPositionalArg<int>();
-  test_parser.AddArg<int>("integer", 'i', "Just a number").Required();
-  test_parser.AddArg<float>("float", 'f');
+  test_parser.AddArg<int>("integer", 'i', "Some integer")
+      .Required()
+      .Options({1, 2, 3});
+  test_parser.AddArg<int>("integer2", 'j', "Another integer")
+      .Options({5, 6, 7})
+      .Default(42);
 
   if (helpstring) {
     test_parser.ExitOnFailure(EXIT_SUCCESS, *helpstring);

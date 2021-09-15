@@ -7,21 +7,21 @@
 
 namespace argparse {
 
-struct StreamReadable {
+struct CustomTypeBase {
   int value;
 };
 
-std::istream& operator>>(std::istream& stream, StreamReadable& var) {
-  return stream >> var.value;
-}
-
-struct StreamReadableAndCastable {
-  int value;
+struct StreamReadable : public CustomTypeBase {
+  friend std::istream& operator>>(std::istream& stream, StreamReadable& var) {
+    return stream >> var.value;
+  }
 };
 
-std::istream& operator>>(std::istream&, StreamReadableAndCastable&) {
-  throw ArgparseError("Shouldn't be called!");
-}
+struct StreamReadableAndCastable : public CustomTypeBase {
+  friend std::istream& operator>>(std::istream&, StreamReadableAndCastable&) {
+    throw ArgparseError("Shouldn't be called!");
+  }
+};
 
 template <>
 class TypeTraits<StreamReadableAndCastable> {
@@ -31,23 +31,24 @@ public:
   }
 };
 
-struct StreamReadableAndComparable {
-  int value;
+struct StreamReadableAndOperatorComparable : public CustomTypeBase {
+  friend std::istream& operator>>(std::istream& stream,
+                                  StreamReadableAndOperatorComparable& var) {
+    return stream >> var.value;
+  }
+
+  friend std::ostream& operator<<(
+      std::ostream& stream, const StreamReadableAndOperatorComparable& var) {
+    return stream << var.value;
+  }
+
+  friend bool operator==(const StreamReadableAndOperatorComparable& a,
+                         const StreamReadableAndOperatorComparable& b) {
+    return a.value == b.value;
+  }
 };
 
-std::istream& operator>>(std::istream& stream,
-                         StreamReadableAndComparable& var) {
-  return stream >> var.value;
-}
-
-bool operator==(const StreamReadableAndComparable& a,
-                const StreamReadableAndComparable& b) {
-  return a.value == b.value;
-}
-
-struct Castable {
-  int value;
-};
+struct Castable : public CustomTypeBase {};
 
 template <>
 class TypeTraits<Castable> {
@@ -57,9 +58,7 @@ public:
   }
 };
 
-struct CastableWithOperatorEqual {
-  int value;
-
+struct CastableWithOperatorEqual : public CustomTypeBase {
   friend bool operator==(const CastableWithOperatorEqual& a,
                          const CastableWithOperatorEqual& b) {
     return a.value == b.value;
@@ -72,11 +71,12 @@ public:
   static CastableWithOperatorEqual FromString(const std::string& str) {
     return {TypeTraits<int>::FromString(str)};
   }
+  static std::string ToString(const CastableWithOperatorEqual& value) {
+    return {TypeTraits<int>::ToString(value.value)};
+  }
 };
 
-struct CastableWithTraitsEqual {
-  int value;
-};
+struct CastableWithTraitsEqual : public CustomTypeBase {};
 
 template <>
 class TypeTraits<CastableWithTraitsEqual> {
@@ -85,29 +85,38 @@ public:
     return {TypeTraits<int>::FromString(str)};
   }
 
+  static std::string ToString(const CastableWithTraitsEqual& value) {
+    return {TypeTraits<int>::ToString(value.value)};
+  }
+
   static bool Equal(const CastableWithTraitsEqual& a,
                     const CastableWithTraitsEqual& b) {
     return a.value == b.value;
   }
 };
 
-struct CastableWithOperatorAndTraitsEqual {
-  int value;
-  friend bool operator==(const CastableWithOperatorAndTraitsEqual&,
-                         const CastableWithOperatorAndTraitsEqual&) {
+struct CastableWithOperatorEqualAndTraitsEqual : public CustomTypeBase {
+  friend bool operator==(const CastableWithOperatorEqualAndTraitsEqual&,
+                         const CastableWithOperatorEqualAndTraitsEqual&) {
     throw ArgparseError("Shouldn't be called!");
   }
 };
 
 template <>
-class TypeTraits<CastableWithOperatorAndTraitsEqual> {
+class TypeTraits<CastableWithOperatorEqualAndTraitsEqual> {
 public:
-  static CastableWithOperatorAndTraitsEqual FromString(const std::string& str) {
+  static CastableWithOperatorEqualAndTraitsEqual FromString(
+      const std::string& str) {
     return {TypeTraits<int>::FromString(str)};
   }
 
-  static bool Equal(const CastableWithOperatorAndTraitsEqual& a,
-                    const CastableWithOperatorAndTraitsEqual& b) {
+  static std::string ToString(
+      const CastableWithOperatorEqualAndTraitsEqual& value) {
+    return {TypeTraits<int>::ToString(value.value)};
+  }
+
+  static bool Equal(const CastableWithOperatorEqualAndTraitsEqual& a,
+                    const CastableWithOperatorEqualAndTraitsEqual& b) {
     return a.value == b.value;
   }
 };
@@ -128,9 +137,10 @@ TEST(CustomTypes, StreamReadableAndCastable) {
   EXPECT_EQ(var->value, 1);
 }
 
-TEST(CustomTypes, StreamReadableAndComparable) {
+TEST(CustomTypes, StreamReadableAndOperatorComparable) {
   Parser parser;
-  auto var = parser.AddArg<StreamReadableAndComparable>("var").Options({{1}});
+  auto var =
+      parser.AddArg<StreamReadableAndOperatorComparable>("var").Options({{1}});
   parser.ParseArgs({"binary", "--var", "1"});
   EXPECT_EQ(var->value, 1);
 }
@@ -156,10 +166,11 @@ TEST(CustomTypes, CastableWithTraitsEqual) {
   EXPECT_EQ(var->value, 1);
 }
 
-TEST(CustomTypes, CastableWithOperatorAndTraitsEqual) {
+TEST(CustomTypes, CastableWithOperatorEqualAndTraitsEqual) {
   Parser parser;
   auto var =
-      parser.AddArg<CastableWithOperatorAndTraitsEqual>("var").Options({{1}});
+      parser.AddArg<CastableWithOperatorEqualAndTraitsEqual>("var").Options(
+          {{1}});
   parser.ParseArgs({"binary", "--var", "1"});
   EXPECT_EQ(var->value, 1);
 }

@@ -6,6 +6,6 @@ Global options:
       --string          Some string
 
 Options:
-  -f, --float           No help, sorry
-  -i, --integer         Just a number (required)
+  -i, --integer         Some integer (required, options: 1, 2, 3)
+  -j, --integer2        Another integer (default: 42, options: 5, 6, 7)
 
