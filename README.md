@@ -164,26 +164,6 @@ int main(int argc, char* argv[]) {
 A program using `argparse::Parser` with custom types having neither required
 operators nor TypeTraits specialization will fail to compile
 
-## Global args
-In order to create a global argument use `argparse::Add*` functions and
-`ARGPARSE_DECLARE_GLOBAL_*` macros to declare arguments defined in external
-compilation units
-```
-// library.cpp
-auto integer = argparse::AddGlobalArg<int>("integer");
-
-// main.cpp
-ARGPARSE_DECLARE_GLOBAL_ARG(int, integer);
-
-int main(int argc, char* argv[]) {
-  argparse::Parser parser;
-  auto local_flag = parser.AddFlag("flag");
-  parser.ParseArgs(argc, argv);
-
-  // use both `local_flag` and `integer` global argument
-}
-```
-
 ## Errors
 All parsing errors will result in throwing `argparse::ArgparseError`. State of
 the parser and holders (including globals) in this case is undefined.
@@ -192,5 +172,5 @@ Optionally, parser can be set to exit the program (via `exit` function)
 parser.ExitOnFailure(exit_code, optional_usage_string);
 ```
 
-# TODO
+## TODO
 * `--help` option
